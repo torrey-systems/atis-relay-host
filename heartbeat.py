@@ -509,7 +509,7 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
         token = station_token_for(icao)
 
         if not token:
-            print("[heartbeat] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+            print("[heartbeat] %s: station token not configured; open the ATIS Relay app" % icao)
             commands_info = {"fetch": "skipped"}
             continue
 
@@ -518,7 +518,7 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
             record_last_heartbeat(now=now, icao=icao)
 
         except (AuthRejected, Forbidden) as exc:
-            print("[heartbeat] %s for %s; set a valid key with: sudo pi-atc set-key --icao %s" % (exc, icao, icao))
+            print("[heartbeat] %s for %s; open the ATIS Relay app" % (exc, icao))
             commands_info = {"fetch": "access_denied"}
             continue
 
@@ -531,7 +531,7 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
             pending = fetch_commands(base_url, token, icao, session=session, sleep_fn=sleep_fn)
 
         except (AuthRejected, Forbidden) as exc:
-            print("[heartbeat] %s for %s; set a valid key with: sudo pi-atc set-key --icao %s" % (exc, icao, icao))
+            print("[heartbeat] %s for %s; open the ATIS Relay app" % (exc, icao))
             commands_info = {"fetch": "access_denied"}
             continue
 
@@ -735,7 +735,7 @@ def run_checkin(s3_client=None, reboot_fn=None, now=None, pi_id=None):
     if mode == "s3":
         return run_s3_checkin(reboot_fn=reboot_fn, now=now, pi_id=pi_id)
 
-    print("[heartbeat] station token not configured; skipping check-in. Set a key with: sudo pi-atc set-key")
+    print("[heartbeat] station token not configured; skipping check-in. Open the ATIS Relay app.")
     status = collect_status(now=now, pi_id=pi_id)
     status["commands"] = {"fetch": "skipped"}
     return status

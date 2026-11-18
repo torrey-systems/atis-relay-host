@@ -1,0 +1,15 @@
+[Unit]
+Description=ATIS Relay recorder
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pi-atc
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/atis-relay --worker
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

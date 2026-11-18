@@ -1,117 +1,90 @@
-# ATIS Relay host
+# ATIS Relay
 
-Raspberry Pi station software for ATIS Relay. It records aviation frequencies with an RTL-SDR, skips duplicate loops, and uploads unique MP3 clips to ATIS Relay.
+Record aviation ATIS audio on a Raspberry Pi and send unique clips to ATIS Relay. This is a desktop app. You do not need the terminal after install.
 
-Supported hardware: Raspberry Pi 3, 4, and 5 on 64-bit Raspberry Pi OS (Bookworm or Trixie). Raspberry Pi Zero W is not supported.
+Supported hardware: Raspberry Pi 4 or 5 on 64-bit Raspberry Pi OS desktop (Bookworm). An RTL-SDR USB radio is the usual audio source. A USB audio adapter also works.
 
-## Install
+## 1. Download the package
 
-Download the `atis-relay-host_<ver>_all.deb` package from GitHub Releases, copy it onto the Pi, and install it:
+On a computer, open the [Releases](https://github.com/torrey-systems/atis-relay-host/releases) page and download `atis-relay-host_0.2.0_all.deb`. Copy that file onto the Pi (USB stick or the Downloads folder).
 
-```bash
-sudo apt install ./atis-relay-host_<ver>_all.deb
-```
+## 2. Double-click to install
 
-Replace `<ver>` with the version on the file, for example `0.1.0`.
+On the Pi, open the `.deb` file. Raspberry Pi OS opens the package installer. Click install and enter your password when asked.
 
-Then set the station key issued by ATIS Relay. A key is scoped to one airport. If this Pi serves two airports, set a key for each:
+If you prefer one line in a terminal:
 
 ```bash
-sudo pi-atc set-key
-sudo pi-atc set-key --icao KMYF
-sudo pi-atc set-key --icao KSEE
+sudo apt install ./atis-relay-host_0.2.0_all.deb
 ```
 
-`--icao` is optional when only one station is configured. The command reads the key from the argument or from stdin and does not print it. You can also pipe it:
+Run that from the folder that contains the file.
 
-```bash
-printf '%s\n' "$STATION_TOKEN" | sudo pi-atc set-key
-```
+Updates: download the newer `.deb` from Releases and install it the same way. An apt repository is not shipped yet, so the Software updater will not pick this up on its own.
 
-Check configuration without printing the key:
+## 3. Open ATIS Relay
 
-```bash
-sudo pi-atc status
-```
+Open the Raspberry Pi menu, then Internet (or Other), then **ATIS Relay**.
 
-On first boot with no saved WiFi, the Pi raises a setup access point named **ATIS Relay Setup** (password `aviation`). Join it, open the captive portal, and enter WiFi plus station ICAO and frequency. Each station has its own key field; leave a field blank to keep a key already on the device.
+![Step 1, airports and station keys](docs/images/step1-airports.png)
 
-## Layout
+## 4. Add your airport and key
 
-| Path | Purpose |
-|------|---------|
-| `/opt/pi-atc` | Application code |
-| `/etc/pi-atc/env` | Configuration (conffile, mode 0600). Units load this file. |
-| `/var/lib/pi-atc` | Runtime state (last upload, heartbeat, commands) |
-| `/usr/bin/pi-atc` | `set-key` and `status` |
+1. Type the airport code (for example `KMYF`).
+2. Type the ATIS frequency in MHz (for example `126.8`).
+3. Paste the station key from atisrelay.com. The field hides the key.
+4. A second airport is optional. Each airport needs its own key.
+5. Click **Next**.
 
-Factory image baking still uses `pi_setup/install.sh`. That script installs the same layout. The package postinst does not prompt for WiFi and does not remove NetworkManager connections.
+The key is stored only on this Pi, in `~/.config/atis-relay`, with permission 600. The app never prints the key.
 
-## Configuration
+## 5. Choose the radio and test it
 
-Edit `/etc/pi-atc/env` or use `pi-atc set-key` and the setup portal.
+![Step 2, audio input and test](docs/images/step2-audio.png)
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `STATION_TOKEN` | Station key from ATIS Relay when this Pi serves one airport | (set with `pi-atc set-key`) |
-| `STATION_TOKENS` | Per-airport keys when this Pi serves two airports | `KMYF:<token>,KSEE:<token>` |
-| `ATIS_RELAY_URL` | Relay base URL | `https://atisrelay.com` |
-| `STATIONS` | Comma-separated `ICAO:FREQ` pairs | `KSAN:124.350,KCRQ:119.600` |
-| `PI_ID` | Optional stable device id. Defaults to the hostname. | `nkx-relay` |
-| `AUDIO_DEVICE` | ALSA device | `plughw:1,0` |
-| `SAMPLE_RATE` | Recording sample rate in Hz | `16000` |
-| `CHUNK_SEC` | Recording duration per chunk in seconds | `60` |
-| `AP_PASSWORD` | Captive portal WiFi password (min 8 chars) | `aviation` |
+1. Pick **USB radio (RTL-SDR)** or a USB audio device.
+2. Click **Test**. You should hear about five seconds of audio.
+3. If it is silent, check the USB plug and antenna, then click **Refresh list**.
+4. Click **Next**.
 
-If `/opt/pi-atc/.env` exists from an older install, the package copies unset keys such as `STATIONS` and `PI_ID` into `/etc/pi-atc/env` without printing values.
+## 6. Start
 
-The uploader and heartbeat wait and log when no station key is configured. They do not crash-loop. Heartbeat and command polling use that airport's token for each configured ICAO. After a 401 they stop using that token until a valid key is set with `sudo pi-atc set-key`. Audio 403 means the token belongs to a different airport.
+![Step 3, start and status](docs/images/step3-start.png)
 
-## Uploads, heartbeat, and commands
+1. Leave **Start automatically when the Pi turns on** checked if you want it to run after you sign in.
+2. Click **Start**.
+3. Status should read **Listening**, then **Uploading** when a new clip is sent.
+4. Last upload uses local time, such as `3:05 PM`.
+5. If something is wrong, the window shows a short explanation and what to try.
 
-With a station key set, the Pi talks to ATIS Relay over HTTPS using `Authorization: Bearer <token>`:
+You do not need sudo after the package is installed. The app does not change WiFi, hostname, or NetworkManager.
 
-- `POST {ATIS_RELAY_URL}/api/pi/{ICAO}/audio` multipart field `file` (MP3, same `ICAO_` tempfile name as before) and form field `recorded_at` (UTC ISO8601). Success is HTTP 201 `{key, icao, received_at}`. 10 MB cap. 30 uploads per station per minute.
-- `POST /api/pi/{ICAO}/heartbeat` about every 5 minutes with `temp_c`, `throttled_flags`, `uptime_seconds`, `capture_status`, and `last_error`. Success is HTTP 200 `{"ok": true}`.
-- `GET /api/pi/{ICAO}/commands` returns `{commands: [{id, command, queued_at, expires_at}]}` where command is `restart_capture`, `usb_reset`, or `reboot`. `POST /api/pi/{ICAO}/commands/{id}/ack` with `{ok, result}`.
+## Status meanings
 
-Audio 401 is a bad token. Audio 403 is a token for a different ICAO. Heartbeat and commands return 401 when a valid token is used on another ICAO. 404 unknown ICAO, 413 too large, and 422 invalid file or recorded_at are not retried. 429 (plain text, back off) and 503 `upload_failed` are retried.
+| Status | Meaning |
+|--------|---------|
+| Listening | Recording the radio |
+| Uploading | Sending a new clip |
+| Waiting for setup | Add an airport and key in the app |
+| Needs attention | Read the message in the window |
+| Stopped | Click Start when you are ready |
 
-Legacy S3 uploads (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` to `s3://ownnav-maps`) remain only when those keys are present and no station token is configured, so existing factory Pis keep working until they are migrated. That path is deprecated. New installs should use a station key. `python3-boto3` is optional for the legacy path only.
+## Factory images
 
-## Hardware
+The `pi_setup/install.sh` script is only for baking a factory SD image. The desktop `.deb` does not run it and does not start a setup hotspot.
 
-- Raspberry Pi 3, 4, or 5
-- RTL-SDR USB dongle (RTL2832U-based)
-- Antenna for aviation VHF (108-137 MHz)
-- SD card (16 GB+)
-- Power supply
+## Uploads
 
-## How it works
+Clips go to `https://atisrelay.com` with `Authorization: Bearer <token>`:
 
-On boot the watchdog (`boot_check.sh`) waits up to 2 minutes for WiFi. If connected, it starts the uploader. If not, it starts the setup access point and captive portal. A heartbeat timer checks in every 5 minutes and honors remote reboot, capture restart, and USB reset commands. A nightly reboot runs at 03:00 America/Los_Angeles (`OnCalendar=*-*-* 03:00:00 America/Los_Angeles`). The Pi clock itself stays UTC.
-
-The uploader records a 60-second chunk, compares it to the previous loop, and uploads when the audio changed or when a station has been silent for 30 minutes.
-
-## Services
-
-| Unit | Role |
-|------|------|
-| `pi-atc.service` | Audio capture and upload |
-| `pi-atc-setup.service` | WiFi watchdog and captive portal |
-| `pi-atc-heartbeat.timer` | Status check-in every 5 minutes |
-| `pi-atc-reboot.timer` | Nightly reboot |
-
-```bash
-journalctl -u pi-atc.service -f
-sudo systemctl restart pi-atc.service
-```
+- `POST /api/pi/{ICAO}/audio` (multipart `file` and `recorded_at`)
+- `POST /api/pi/{ICAO}/heartbeat`
+- `GET /api/pi/{ICAO}/commands` and `POST /api/pi/{ICAO}/commands/{id}/ack`
 
 ## Development
 
 ```bash
 python3 -m unittest discover -s tests -v
-shellcheck pi_setup/*.sh
 ```
 
-GitHub Actions builds `atis-relay-host_<ver>_all.deb` on every push and pull request (artifact name `atis-relay-host-deb`) and attaches it to GitHub Releases for `v*` tags.
+GitHub Actions builds `atis-relay-host_<ver>_all.deb` (artifact name `atis-relay-host-deb`).

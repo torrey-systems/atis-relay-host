@@ -67,7 +67,7 @@ class SetKeyTest(unittest.TestCase):
         self.assertNotIn(TOKEN, stdout.getvalue())
         self.assertIn("STATION_TOKEN=%s\n" % TOKEN, open(self.env_path).read())
 
-    def test_set_key_requires_root(self):
+    def test_set_key_works_without_root(self):
         stdout = io.StringIO()
 
         with patch("os.geteuid", return_value=1):
@@ -78,10 +78,10 @@ class SetKeyTest(unittest.TestCase):
                 path=self.env_path,
             )
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
         self.assertNotIn(TOKEN, stdout.getvalue())
-        self.assertEqual(self.restarts, [])
-        self.assertNotIn(TOKEN, open(self.env_path).read())
+        self.assertTrue(self.restarts)
+        self.assertIn("STATION_TOKEN=%s\n" % TOKEN, open(self.env_path).read())
 
     def test_status_masks_token(self):
         with open(self.env_path, "w") as f:

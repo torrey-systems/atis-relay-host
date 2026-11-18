@@ -15,7 +15,14 @@ DEFAULT_PI_ID = "pi-atc"
 
 
 def state_dir():
-    return os.environ.get("PI_ATC_STATE_DIR", "/var/lib/pi-atc")
+    override = os.environ.get("PI_ATC_STATE_DIR")
+
+    if isinstance(override, str) and override.strip():
+        return override.strip()
+
+    from pi_atc_config import user_state_dir
+
+    return user_state_dir()
 
 
 def utc_now_iso(now=None):

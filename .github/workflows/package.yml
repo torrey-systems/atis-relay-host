@@ -71,23 +71,26 @@ jobs:
             exit 1
           fi
           apt-get install -y "/dist/${DEB_FILE}"
+          test -x /usr/bin/atis-relay
           test -x /usr/bin/pi-atc
-          test -f /etc/pi-atc/env
-          test -f /opt/pi-atc/audio_uploader.py
-          test -f /lib/systemd/system/pi-atc.service
-          grep -q 'EnvironmentFile=-/etc/pi-atc/env' /lib/systemd/system/pi-atc.service
-          grep -q '^STATION_TOKEN=$' /etc/pi-atc/env
-          grep -q '^STATION_TOKENS=$' /etc/pi-atc/env
-          python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config'
-          out=$(printf 'smoke-token-not-for-prod\n' | pi-atc set-key 2>&1) || true
+          test -f /usr/share/applications/atis-relay.desktop
+          grep -q '^Name=ATIS Relay' /usr/share/applications/atis-relay.desktop
+          test -f /usr/share/icons/hicolor/scalable/apps/atis-relay.svg
+          test -f /usr/lib/systemd/user/atis-relay.service
+          test -f /opt/pi-atc/atis_relay_gui.py
+          test ! -f /lib/systemd/system/pi-atc-setup.service
+          test ! -f /etc/NetworkManager/conf.d/wifi-powersave-off.conf
+          python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config, atis_relay_status'
+          out=$(printf 'smoke-token-not-for-prod\n' | HOME=/tmp/atis-smoke atis-relay set-key 2>&1) || true
           printf '%s\n' "$out"
           if printf '%s\n' "$out" | grep -q smoke-token-not-for-prod; then
             echo "token leaked from set-key"
             exit 1
           fi
-          grep -q '^STATION_TOKEN=smoke-token-not-for-prod$' /etc/pi-atc/env
-          stat -c '%a' /etc/pi-atc/env | grep -qx 600
-          status_out=$(pi-atc status 2>&1)
+          test -f /tmp/atis-smoke/.config/atis-relay/env
+          grep -q '^STATION_TOKEN=smoke-token-not-for-prod$' /tmp/atis-smoke/.config/atis-relay/env
+          stat -c '%a' /tmp/atis-smoke/.config/atis-relay/env | grep -qx 600
+          status_out=$(HOME=/tmp/atis-smoke atis-relay status 2>&1)
           printf '%s\n' "$status_out"
           if printf '%s\n' "$status_out" | grep -q smoke-token-not-for-prod; then
             echo "token leaked from status"
@@ -103,6 +106,6 @@ jobs:
           DEB="$(ls dist/atis-relay-host_*_all.deb)"
           gh release create "${{ github.ref_name }}" "$DEB" \
             --title "${{ github.ref_name }}" \
-            --generate-notes \
+            --notes "ATIS Relay host package for Raspberry Pi OS." \
             --repo "${{ github.repository }}" \
             || gh release upload "${{ github.ref_name }}" "$DEB" --clobber --repo "${{ github.repository }}"

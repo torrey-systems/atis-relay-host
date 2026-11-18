@@ -15,5 +15,6 @@ __pycache__/
 *.pyc
 dist/
 packaging/changelog.Debian.gz
+.screenshot-home/
 # local audio samples
 *.wav
