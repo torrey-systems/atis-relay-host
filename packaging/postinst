@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  configure)
+    mkdir -p /var/lib/pi-atc
+    chmod 0755 /var/lib/pi-atc
+
+    if [ -x /usr/bin/python3 ] && [ -f /opt/pi-atc/pi_atc_config.py ]; then
+      python3 /opt/pi-atc/pi_atc_config.py migrate || true
+    fi
+
+    if [ -f /etc/pi-atc/env ]; then
+      chmod 0600 /etc/pi-atc/env
+      chown root:root /etc/pi-atc/env 2>/dev/null || true
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+      systemctl enable pi-atc.service >/dev/null 2>&1 || true
+      systemctl enable pi-atc-setup.service >/dev/null 2>&1 || true
+      systemctl enable pi-atc-heartbeat.timer >/dev/null 2>&1 || true
+      systemctl enable pi-atc-reboot.timer >/dev/null 2>&1 || true
+      systemctl restart systemd-journald >/dev/null 2>&1 || true
+      systemctl start pi-atc-heartbeat.timer >/dev/null 2>&1 || true
+      systemctl start pi-atc-reboot.timer >/dev/null 2>&1 || true
+      systemctl start pi-atc-setup.service >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
+exit 0

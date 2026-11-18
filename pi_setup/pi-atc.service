@@ -10,7 +10,8 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/pi-atc/audio_uploader.py
 Restart=on-failure
 RestartSec=10
-EnvironmentFile=/opt/pi-atc/.env
+EnvironmentFile=-/opt/pi-atc/.env
+EnvironmentFile=-/etc/pi-atc/env
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+
+stop_units() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  systemctl stop pi-atc.service >/dev/null 2>&1 || true
+  systemctl stop pi-atc-setup.service >/dev/null 2>&1 || true
+  systemctl stop pi-atc-heartbeat.timer >/dev/null 2>&1 || true
+  systemctl stop pi-atc-heartbeat.service >/dev/null 2>&1 || true
+  systemctl stop pi-atc-reboot.timer >/dev/null 2>&1 || true
+}
+
+disable_units() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  systemctl disable pi-atc.service >/dev/null 2>&1 || true
+  systemctl disable pi-atc-setup.service >/dev/null 2>&1 || true
+  systemctl disable pi-atc-heartbeat.timer >/dev/null 2>&1 || true
+  systemctl disable pi-atc-reboot.timer >/dev/null 2>&1 || true
+}
+
+case "$1" in
+  remove)
+    stop_units
+    disable_units
+    ;;
+  upgrade|deconfigure)
+    stop_units
+    ;;
+esac
+
+exit 0

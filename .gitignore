@@ -13,6 +13,6 @@ samples_clean/
 # python
 __pycache__/
 *.pyc
-VERSION
+dist/
 # local audio samples
 *.wav

@@ -1,0 +1,8 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: atis-relay-host
+Source: https://github.com/torrey-systems/atis-relay-host
+
+Files: *
+Copyright: Torrey Systems
+License: proprietary
+ All rights reserved.

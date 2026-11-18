@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 LAST_UPLOAD_FILE = "last_upload.json"
 LAST_COMMAND_FILE = "last_command.json"
+LAST_HEARTBEAT_FILE = "last_heartbeat.json"
 SETUP_CURRENT_FILE = "setup_current"
 SETUP_EPISODES_FILE = "setup_episodes.jsonl"
 MODE_FILE = "mode"
@@ -157,6 +158,45 @@ def read_last_upload():
 def read_last_uploads():
     _, stations = read_upload_state()
     return stations
+
+
+def record_last_heartbeat(now=None, icao=None):
+    ensure_state_dir()
+    entry = {"ts": utc_now_iso(now)}
+
+    if icao:
+        entry["station"] = icao
+
+    data = read_json(state_path(LAST_HEARTBEAT_FILE), default={})
+
+    if not isinstance(data, dict):
+        data = {}
+
+    stations = data.get("stations")
+
+    if not isinstance(stations, dict):
+        stations = {}
+
+    if icao:
+        stations[icao] = entry
+
+    data["last"] = entry
+    data["stations"] = stations
+    write_json_atomic(state_path(LAST_HEARTBEAT_FILE), data)
+
+
+def read_last_heartbeat():
+    data = read_json(state_path(LAST_HEARTBEAT_FILE))
+
+    if not isinstance(data, dict):
+        return None
+
+    last = data.get("last")
+
+    if isinstance(last, dict):
+        return last
+
+    return None
 
 
 def write_last_command(payload):

@@ -42,7 +42,9 @@ if [ -d "$INSTALL_DIR" ]; then
     cp -a "$INSTALL_DIR" "$BACKUP_DIR/opt-pi-atc"
 fi
 for name in "${UNIT_NAMES[@]}"; do
-    if [ -f "/etc/systemd/system/${name}" ]; then
+    if [ -f "/lib/systemd/system/${name}" ]; then
+        cp -a "/lib/systemd/system/${name}" "$BACKUP_DIR/units/"
+    elif [ -f "/etc/systemd/system/${name}" ]; then
         cp -a "/etc/systemd/system/${name}" "$BACKUP_DIR/units/"
     fi
 done
@@ -57,15 +59,33 @@ for rel in "${SETUP_SCRIPTS[@]}"; do
 done
 
 echo "[deploy] Installing code to ${INSTALL_DIR}..."
-mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/pi_setup" /var/lib/pi-atc /var/log/journal
-cp "$REPO_DIR/audio_uploader.py" "$INSTALL_DIR/"
-cp "$REPO_DIR/heartbeat.py" "$INSTALL_DIR/"
-cp "$REPO_DIR/pi_atc_state.py" "$INSTALL_DIR/"
+mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/pi_setup" /var/lib/pi-atc /var/log/journal /etc/pi-atc
+for src in "$REPO_DIR"/*.py; do
+    cp "$src" "$INSTALL_DIR/"
+done
 
-if git -C "$REPO_DIR" rev-parse HEAD >/dev/null 2>&1; then
+if [ -f "$REPO_DIR/VERSION" ]; then
+    cp "$REPO_DIR/VERSION" "$INSTALL_DIR/VERSION"
+elif git -C "$REPO_DIR" rev-parse HEAD >/dev/null 2>&1; then
     git -C "$REPO_DIR" rev-parse HEAD > "$INSTALL_DIR/VERSION"
 else
     printf 'unknown\n' > "$INSTALL_DIR/VERSION"
+fi
+
+if [ -f "$REPO_DIR/packaging/pi-atc" ]; then
+    install -m 755 "$REPO_DIR/packaging/pi-atc" /usr/bin/pi-atc
+fi
+
+if [ -f "$INSTALL_DIR/.env" ] && [ ! -f /etc/pi-atc/env ]; then
+    python3 "$INSTALL_DIR/pi_atc_config.py" migrate || true
+elif [ ! -f /etc/pi-atc/env ]; then
+    cat > /etc/pi-atc/env <<EOF
+ATIS_RELAY_URL=https://atisrelay.com
+STATION_TOKEN=
+STATIONS=
+PI_ID=
+EOF
+    chmod 600 /etc/pi-atc/env
 fi
 
 shopt -s nullglob
@@ -77,7 +97,7 @@ chmod +x "$INSTALL_DIR/pi_setup/"*.sh
 
 echo "[deploy] Installing units and config..."
 for name in "${UNIT_NAMES[@]}"; do
-    install -m 644 "$INSTALL_DIR/pi_setup/${name}" "/etc/systemd/system/${name}"
+    install -m 644 "$INSTALL_DIR/pi_setup/${name}" "/lib/systemd/system/${name}"
 done
 
 mkdir -p /etc/systemd/journald.conf.d /etc/NetworkManager/conf.d
@@ -101,4 +121,4 @@ else
 fi
 
 echo "[deploy] Done. Backup is at ${BACKUP_DIR}"
-echo "[deploy] Left /opt/pi-atc/.env and NetworkManager connection profiles untouched."
+echo "[deploy] Left /etc/pi-atc/env and NetworkManager connection profiles untouched."

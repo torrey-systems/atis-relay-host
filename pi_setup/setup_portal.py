@@ -6,7 +6,17 @@ from pathlib import Path
 from flask import Flask, request, redirect
 
 APP_DIR = Path("/opt/pi-atc")
-ENV_PATH = APP_DIR / ".env"
+DEFAULT_ENV_PATH = Path("/etc/pi-atc/env")
+LEGACY_ENV_PATH = APP_DIR / ".env"
+
+
+def env_file_path():
+    override = os.environ.get("PI_ATC_ENV_FILE")
+
+    if override:
+        return Path(override)
+
+    return DEFAULT_ENV_PATH
 
 app = Flask(__name__)
 
@@ -64,6 +74,9 @@ button:hover{background:#2563eb}
     <input id="freq2" name="freq2" placeholder="119.60"
       inputmode="decimal" pattern="[0-9]{3}\\.[0-9]{1,3}" maxlength="7" value="{{FREQ2}}">
 
+    <label for="station_key">Station key <span style="font-weight:400;text-transform:none">(optional; leave blank to keep the current key)</span></label>
+    <input id="station_key" name="station_key" type="password" autocomplete="off">
+
     <button type="submit">Save &amp; Connect</button>
   </form>
 </div>
@@ -118,22 +131,41 @@ def validate_freq(val):
         return False
 
 
-def write_env(stations):
+def write_env(stations, station_key=None):
     existing = {}
-    if ENV_PATH.exists():
-        for line in ENV_PATH.read_text().splitlines():
+    path = env_file_path()
+    sources = []
+
+    if path.exists():
+        sources.append(path)
+
+    if LEGACY_ENV_PATH.exists() and LEGACY_ENV_PATH != path:
+        sources.append(LEGACY_ENV_PATH)
+
+    for src in sources:
+        for line in src.read_text().splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             if "=" in line:
                 k, v = line.split("=", 1)
-                existing[k.strip()] = v.strip()
+                key = k.strip()
+                if key not in existing or existing.get(key) == "":
+                    existing[key] = v.strip()
 
     existing["STATIONS"] = ",".join(f"{icao}:{freq}" for icao, freq in stations)
 
+    if "ATIS_RELAY_URL" not in existing or existing.get("ATIS_RELAY_URL") == "":
+        existing["ATIS_RELAY_URL"] = "https://atisrelay.com"
+
+    if station_key:
+        existing["STATION_TOKEN"] = station_key
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     APP_DIR.mkdir(parents=True, exist_ok=True)
     lines = [f"{k}={v}" for k, v in existing.items()]
-    ENV_PATH.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n")
+    os.chmod(path, 0o600)
 
 
 def configure_wifi(ssid, psk):
@@ -170,6 +202,7 @@ def submit():
     freq1 = request.form.get("freq1", "").strip()
     icao2 = request.form.get("icao2", "").strip().upper()
     freq2 = request.form.get("freq2", "").strip()
+    station_key = request.form.get("station_key", "").strip()
     fields = dict(ssid=ssid, icao1=icao1, freq1=freq1, icao2=icao2, freq2=freq2)
 
     if not ssid or not psk:
@@ -192,7 +225,7 @@ def submit():
 
         stations.append((icao2, freq2))
 
-    write_env(stations)
+    write_env(stations, station_key=station_key or None)
     configure_wifi(ssid, psk)
 
     subprocess.Popen(["bash", "-c", "sleep 3 && reboot"], close_fds=True)
