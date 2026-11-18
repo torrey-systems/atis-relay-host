@@ -14,5 +14,6 @@ samples_clean/
 __pycache__/
 *.pyc
 dist/
+packaging/changelog.Debian.gz
 # local audio samples
 *.wav

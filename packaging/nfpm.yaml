@@ -6,7 +6,9 @@ section: net
 priority: optional
 maintainer: Torrey Systems <deploy@atisrelay.com>
 homepage: https://atisrelay.com
-description: ATIS Relay Raspberry Pi station
+description: |-
+  ATIS Relay Raspberry Pi station
+  Records aviation frequencies with an RTL-SDR and uploads unique ATIS clips to ATIS Relay over HTTPS.
 depends:
   - python3 (>= 3.10)
   - python3-flask
@@ -68,8 +70,8 @@ contents:
     dst: /usr/share/doc/atis-relay-host/README.md
   - src: packaging/copyright
     dst: /usr/share/doc/atis-relay-host/copyright
-  - src: packaging/changelog
-    dst: /usr/share/doc/atis-relay-host/changelog.Debian
+  - src: packaging/changelog.Debian.gz
+    dst: /usr/share/doc/atis-relay-host/changelog.Debian.gz
   - src: packaging/lintian-overrides
     dst: /usr/share/lintian/overrides/atis-relay-host
 scripts:

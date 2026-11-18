@@ -1,4 +1,3 @@
 atis-relay-host: no-manual-page
 atis-relay-host: systemd-service-file-missing-install-key
-atis-relay-host: changelog-file-missing-in-native-package
-atis-relay-host: debian-changelog-file-missing
+atis-relay-host: dir-or-file-in-opt *

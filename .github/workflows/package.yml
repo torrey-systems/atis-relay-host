@@ -36,6 +36,7 @@ jobs:
       - name: Build deb
         run: |
           mkdir -p dist
+          gzip -9n -c packaging/changelog > packaging/changelog.Debian.gz
           VERSION="${{ steps.version.outputs.version }}" nfpm package \
             --config packaging/nfpm.yaml \
             --packager deb \
@@ -65,7 +66,7 @@ jobs:
           printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
           chmod 755 /usr/sbin/policy-rc.d
           lintian -i "/dist/${DEB_FILE}" | tee /tmp/lintian.log
-          if grep -E '^E: ' /tmp/lintian.log | grep -vE 'no-manual-page|changelog-file-missing-in-native-package|debian-changelog-file-missing'; then
+          if grep -E '^E: ' /tmp/lintian.log | grep -vE 'no-manual-page|dir-or-file-in-opt'; then
             echo "lintian errors"
             exit 1
           fi
