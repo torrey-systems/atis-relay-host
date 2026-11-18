@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pi_atc_config import (
     atis_relay_url,
     load_config,
-    station_token,
+    station_token_for,
     stations_from_env,
     upload_mode,
 )
@@ -426,14 +426,31 @@ def persist_command_result(result, now=None):
     return payload
 
 
+def parse_throttled_flags(raw):
+    if raw is None or raw == "":
+        return None
+
+    text = str(raw).strip()
+
+    try:
+        if text.lower().startswith("0x"):
+            return int(text, 16)
+
+        return int(text)
+
+    except (TypeError, ValueError):
+        return None
+
+
 def heartbeat_payload_from_status(status):
     service = status.get("pi_atc_service") or {}
     active = service.get("active")
     capture = "running" if active == "active" else "stopped"
     payload = {
         "temp_c": status.get("cpu_temp_c"),
-        "throttled_flags": status.get("throttled"),
+        "throttled_flags": parse_throttled_flags(status.get("throttled")),
         "capture_status": capture,
+        "last_error": None,
     }
     uptime = status.get("uptime_seconds")
 
@@ -444,13 +461,14 @@ def heartbeat_payload_from_status(status):
         except (TypeError, ValueError):
             pass
 
-    return {key: value for key, value in payload.items() if value is not None}
+    return {key: value for key, value in payload.items() if value is not None or key == "last_error"}
 
 
 def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_fn=None):
     from pi_atc_http import (
         AuthRejected,
         ClientError,
+        Forbidden,
         TransientError,
         ack_command,
         fetch_commands,
@@ -467,7 +485,6 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
         reboot_fn = default_reboot
 
     status = collect_status(now=now, pi_id=pi_id)
-    token = station_token()
     base_url = atis_relay_url()
     stations = stations_from_env()
     payload = heartbeat_payload_from_status(status)
@@ -489,15 +506,21 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
         sleep_fn = time.sleep
 
     for icao, _freq in stations:
+        token = station_token_for(icao)
+
+        if not token:
+            print("[heartbeat] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+            commands_info = {"fetch": "skipped"}
+            continue
+
         try:
             post_heartbeat(base_url, token, icao, payload, session=session, sleep_fn=sleep_fn)
             record_last_heartbeat(now=now, icao=icao)
 
-        except AuthRejected as exc:
-            print("[heartbeat] %s for %s; set a valid key with: sudo pi-atc set-key" % (exc, icao))
+        except (AuthRejected, Forbidden) as exc:
+            print("[heartbeat] %s for %s; set a valid key with: sudo pi-atc set-key --icao %s" % (exc, icao, icao))
             commands_info = {"fetch": "access_denied"}
-            status["commands"] = commands_info
-            return status
+            continue
 
         except (TransientError, ClientError) as exc:
             print("[heartbeat] heartbeat failed for %s: %s" % (icao, exc))
@@ -507,11 +530,10 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
         try:
             pending = fetch_commands(base_url, token, icao, session=session, sleep_fn=sleep_fn)
 
-        except AuthRejected as exc:
-            print("[heartbeat] %s for %s; set a valid key with: sudo pi-atc set-key" % (exc, icao))
+        except (AuthRejected, Forbidden) as exc:
+            print("[heartbeat] %s for %s; set a valid key with: sudo pi-atc set-key --icao %s" % (exc, icao, icao))
             commands_info = {"fetch": "access_denied"}
-            status["commands"] = commands_info
-            return status
+            continue
 
         except (TransientError, ClientError) as exc:
             print("[heartbeat] command fetch failed for %s: %s" % (icao, exc))
@@ -566,7 +588,7 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
                     sleep_fn=sleep_fn,
                 )
 
-            except (AuthRejected, TransientError, ClientError) as exc:
+            except (AuthRejected, Forbidden, TransientError, ClientError) as exc:
                 print("[heartbeat] command ack failed for %s: %s" % (icao, exc))
 
             last = persist_command_result({

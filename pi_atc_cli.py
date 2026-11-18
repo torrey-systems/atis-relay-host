@@ -9,10 +9,11 @@ from pi_atc_config import (
     env_path,
     load_config,
     mask_secret,
-    read_env_file,
-    set_env_value,
+    set_station_token,
     station_token,
+    station_token_for,
     stations_from_env,
+    token_map_from_env,
     upload_mode,
 )
 from pi_atc_state import read_last_heartbeat, read_last_upload, read_last_uploads, read_mode
@@ -32,14 +33,48 @@ def default_restart(names=SERVICES_TO_RESTART):
         )
 
 
-def read_token_arg(argv, stdin):
-    if len(argv) >= 2 and argv[1]:
-        token = argv[1]
+def parse_set_key_args(argv):
+    icao = None
+    token = None
+    args = list(argv[1:])
+    i = 0
 
-        if len(sys.argv) > 2:
-            sys.argv[2] = "***"
+    while i < len(args):
+        arg = args[i]
 
-        return token.strip()
+        if arg in ("--icao", "-i"):
+            if i + 1 >= len(args):
+                return None, None, "missing icao after --icao"
+
+            icao = args[i + 1].strip().upper()
+            i += 2
+            continue
+
+        if arg.startswith("--icao="):
+            icao = arg.split("=", 1)[1].strip().upper()
+            i += 1
+            continue
+
+        if token is None:
+            token = arg
+
+        i += 1
+
+    return icao, token, None
+
+
+def scrub_token(token):
+    if not token:
+        return
+
+    for i, arg in enumerate(sys.argv):
+        if arg == token:
+            sys.argv[i] = "***"
+
+
+def read_token_value(parsed_token, stdin):
+    if parsed_token:
+        return parsed_token.strip()
 
     if stdin is None:
         stdin = sys.stdin
@@ -66,13 +101,25 @@ def cmd_set_key(argv, stdin=None, stdout=None, restart_fn=None, path=None):
         print("pi-atc set-key must be run as root", file=stdout)
         return 1
 
-    token = read_token_arg(argv, stdin)
+    icao, parsed_token, parse_error = parse_set_key_args(argv)
+
+    if parse_error:
+        print(parse_error, file=stdout)
+        return 1
+
+    token = read_token_value(parsed_token, stdin)
+    scrub_token(token)
 
     if not token:
         print("station key is required", file=stdout)
         return 1
 
-    set_env_value(path, "STATION_TOKEN", token)
+    error = set_station_token(path, token, icao=icao)
+
+    if error:
+        print(error, file=stdout)
+        return 1
+
     restart_fn()
     print("station key saved; services restarted", file=stdout)
     return 0
@@ -86,19 +133,23 @@ def cmd_status(stdout=None, environ=None):
         environ = os.environ
 
     load_config()
-    token = station_token(environ)
+    tokens = token_map_from_env(environ)
+    shorthand = station_token(environ)
     stations = stations_from_env(environ)
     mode = upload_mode(environ)
     last = read_last_upload()
     uploads = read_last_uploads()
     heartbeat = read_last_heartbeat()
     device_mode = read_mode() or "unknown"
-    print("token: %s" % mask_secret(token), file=stdout)
+    print("token: %s" % ("set" if (tokens or shorthand) else "not set"), file=stdout)
     print("relay url: %s" % atis_relay_url(environ), file=stdout)
     print("upload mode: %s" % ("http" if mode == "http" else ("legacy s3 (deprecated)" if mode == "s3" else "none")), file=stdout)
 
     if stations:
         print("stations: %s" % ", ".join("%s:%s" % item for item in stations), file=stdout)
+
+        for icao, freq in stations:
+            print("  %s:%s token: %s" % (icao, freq, mask_secret(station_token_for(icao, environ))), file=stdout)
 
     else:
         print("stations: not set", file=stdout)
@@ -128,7 +179,7 @@ def cmd_status(stdout=None, environ=None):
 
 
 def usage(stdout):
-    print("usage: pi-atc set-key [token]", file=stdout)
+    print("usage: pi-atc set-key [--icao ICAO] [token]", file=stdout)
     print("       pi-atc status", file=stdout)
 
 

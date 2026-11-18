@@ -91,6 +91,47 @@ class ConfigMigrationTest(unittest.TestCase):
             "AWS_SECRET_ACCESS_KEY": SECRET,
         }), "http")
         self.assertEqual(config.upload_mode({}), "none")
+        self.assertEqual(config.upload_mode({
+            "STATION_TOKEN": "abc",
+            "STATIONS": "KMYF:126.8,KSEE:135.1",
+        }), "none")
+        self.assertEqual(config.upload_mode({
+            "STATION_TOKENS": "KMYF:abc,KSEE:def",
+            "STATIONS": "KMYF:126.8,KSEE:135.1",
+        }), "http")
+
+    def test_station_token_for_icao(self):
+        environ = {
+            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATION_TOKENS": "KMYF:tok-myf,KSEE:tok-see",
+        }
+        self.assertEqual(config.station_token_for("kmyf", environ), "tok-myf")
+        self.assertEqual(config.station_token_for("KSEE", environ), "tok-see")
+        self.assertEqual(config.station_token_for("KNKX", environ), "")
+
+    def test_station_token_shorthand_single_station_only(self):
+        self.assertEqual(config.station_token_for("KMYF", {
+            "STATIONS": "KMYF:126.8",
+            "STATION_TOKEN": "only-one",
+        }), "only-one")
+        self.assertEqual(config.station_token_for("KMYF", {
+            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATION_TOKEN": "only-one",
+        }), "")
+        self.assertEqual(config.station_token_for("KSEE", {
+            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATION_TOKEN": "only-one",
+        }), "")
+
+    def test_migrate_station_tokens(self):
+        with open(self.legacy, "w") as f:
+            f.write("STATIONS=KMYF:126.8,KSEE:135.1\n")
+            f.write("STATION_TOKENS=KMYF:%s,KSEE:%s\n" % (TOKEN, SECRET))
+
+        copied = config.migrate_legacy_env(self.legacy, self.dest)
+        dest = config.read_env_file(self.dest)
+        self.assertGreater(copied, 0)
+        self.assertEqual(dest["STATION_TOKENS"], "KMYF:%s,KSEE:%s" % (TOKEN, SECRET))
 
     def test_mask_secret(self):
         masked = config.mask_secret(TOKEN)

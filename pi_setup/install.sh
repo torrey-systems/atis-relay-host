@@ -97,6 +97,7 @@ elif [ ! -f "$ENV_FILE" ]; then
     cat > "$ENV_FILE" <<EOF
 ATIS_RELAY_URL=https://atisrelay.com
 STATION_TOKEN=
+STATION_TOKENS=
 STATIONS=
 PI_ID=
 EOF

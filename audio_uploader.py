@@ -10,13 +10,12 @@ from pi_atc_config import (
     atis_relay_url,
     load_config,
     parse_stations,
-    station_token,
+    station_token_for,
     upload_mode,
 )
 from pi_atc_state import derive_pi_id, record_last_upload, utc_now_iso
 
 WAIT_SEC = 60
-AUTH_WAIT_SEC = 120
 
 load_config()
 
@@ -204,8 +203,7 @@ def record_wav(out_path: str, freq_mhz: str) -> bool:
 bucket = "ownnav-maps"
 prefix = "raw_atc_stream/"
 _s3 = None
-_auth_rejected = False
-_rejected_token = ""
+_rejected_tokens = {}
 
 
 def s3_client():
@@ -233,7 +231,8 @@ def wait_for_config():
             print("[wait] no stations configured; set them in the setup portal or /etc/pi-atc/env")
 
         else:
-            print("[wait] station token not configured; set a key with: sudo pi-atc set-key")
+            hint = STATIONS[0][0] if STATIONS else "ICAO"
+            print("[wait] station token not configured; set a key with: sudo pi-atc set-key --icao %s" % hint)
 
         time.sleep(WAIT_SEC)
 
@@ -254,9 +253,17 @@ def upload_file_s3(mp3_path: str, icao: str) -> str | None:
 
 
 def upload_file_http(mp3_path: str, icao: str) -> str | None:
-    global _auth_rejected
-    global _rejected_token
-    from pi_atc_http import AuthRejected, ClientError, TransientError, upload_audio
+    from pi_atc_http import AuthRejected, ClientError, Forbidden, TransientError, upload_audio
+
+    token = station_token_for(icao)
+
+    if not token:
+        print("[wait] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        return None
+
+    if _rejected_tokens.get(icao) == token:
+        print("[wait] %s: station token rejected; set a valid key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        return None
 
     filename = os.path.basename(mp3_path)
     recorded_at = utc_now_iso()
@@ -264,7 +271,7 @@ def upload_file_http(mp3_path: str, icao: str) -> str | None:
     try:
         key, _body = upload_audio(
             atis_relay_url(),
-            station_token(),
+            token,
             icao,
             mp3_path,
             recorded_at,
@@ -274,17 +281,21 @@ def upload_file_http(mp3_path: str, icao: str) -> str | None:
         return key
 
     except AuthRejected as exc:
-        _auth_rejected = True
-        _rejected_token = station_token()
-        print(f"[error] {exc}; uploads stopped until a valid key is set with: sudo pi-atc set-key")
+        _rejected_tokens[icao] = token
+        print("[error] %s: %s; set a valid key with: sudo pi-atc set-key --icao %s" % (icao, exc, icao))
+        return None
+
+    except Forbidden as exc:
+        _rejected_tokens[icao] = token
+        print("[error] %s: %s; set this airport's key with: sudo pi-atc set-key --icao %s" % (icao, exc, icao))
         return None
 
     except TransientError as exc:
-        print(f"[error] upload retry exhausted: {exc}")
+        print(f"[error] {icao}: upload retry exhausted: {exc}")
         return None
 
     except ClientError as exc:
-        print(f"[error] {exc}")
+        print(f"[error] {icao}: {exc}")
         return None
 
 
@@ -311,7 +322,7 @@ def upload_file(path: str, icao: str) -> str | None:
         if mode == "s3":
             return upload_file_s3(mp3_path, icao)
 
-        print("[wait] station token not configured; set a key with: sudo pi-atc set-key")
+        print("[wait] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
         return None
     except Exception as e:
         print(f"[error] Failed to upload file: {e}")
@@ -328,7 +339,6 @@ def main():
     max_stale_sec = 1800
     usb_disabled = False
     thermal_recovery = False
-    global _auth_rejected
     global STATIONS
 
     wait_for_config()
@@ -358,18 +368,6 @@ def main():
                 time.sleep(5)
             else:
                 time.sleep(30)
-                continue
-
-        if _auth_rejected:
-            load_config()
-            current_token = station_token()
-
-            if upload_mode() == "s3" or (current_token and current_token != _rejected_token):
-                _auth_rejected = False
-
-            else:
-                print("[wait] station token rejected; set a valid key with: sudo pi-atc set-key")
-                time.sleep(AUTH_WAIT_SEC)
                 continue
 
         load_config()

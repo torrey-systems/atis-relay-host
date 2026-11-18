@@ -65,7 +65,11 @@ class HttpClientTest(unittest.TestCase):
         self.sleeps.append(seconds)
 
     def test_upload_multipart_shape_and_201(self):
-        session = FakeSession([FakeResponse(201, {"ok": True, "key": "audio/KMYF/KMYF_abc123.mp3"})])
+        session = FakeSession([FakeResponse(201, {
+            "key": "raw_atc_stream/KMYF/20261118T200000Z-abc.mp3",
+            "icao": "KMYF",
+            "received_at": "2026-11-18T20:00:05Z",
+        })])
         key, body = http.upload_audio(
             "https://atisrelay.com",
             "station-token-value",
@@ -75,8 +79,9 @@ class HttpClientTest(unittest.TestCase):
             session=session,
             sleep_fn=self.sleep,
         )
-        self.assertEqual(key, "audio/KMYF/KMYF_abc123.mp3")
-        self.assertEqual(body["ok"], True)
+        self.assertEqual(key, "raw_atc_stream/KMYF/20261118T200000Z-abc.mp3")
+        self.assertEqual(body["icao"], "KMYF")
+        self.assertEqual(body["received_at"], "2026-11-18T20:00:05Z")
         self.assertEqual(len(session.calls), 1)
         call = session.calls[0]
         self.assertEqual(call["method"], "POST")
@@ -109,12 +114,12 @@ class HttpClientTest(unittest.TestCase):
         self.assertNotIn("bad-token", str(ctx.exception))
 
     def test_upload_403_does_not_retry(self):
-        session = FakeSession([FakeResponse(403, {"error": "unauthorized"})])
+        session = FakeSession([FakeResponse(403, {"error": "forbidden"})])
 
-        with self.assertRaises(http.AuthRejected):
+        with self.assertRaises(http.Forbidden) as ctx:
             http.upload_audio(
                 "https://atisrelay.com",
-                "bad-token",
+                "other-icao-token",
                 "KMYF",
                 self.mp3,
                 "2026-11-18T20:00:00Z",
@@ -122,7 +127,67 @@ class HttpClientTest(unittest.TestCase):
                 sleep_fn=self.sleep,
             )
 
+        self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(len(session.calls), 1)
+        self.assertEqual(self.sleeps, [])
+        self.assertNotIn("other-icao-token", str(ctx.exception))
+
+    def test_upload_404_413_422_do_not_retry(self):
+        for status, text in ((404, "not_found"), (413, "too_large"), (422, "invalid_file")):
+            session = FakeSession([FakeResponse(status, {"error": text})])
+            self.sleeps = []
+
+            with self.assertRaises(http.ClientError) as ctx:
+                http.upload_audio(
+                    "https://atisrelay.com",
+                    "station-token-value",
+                    "KMYF",
+                    self.mp3,
+                    "2026-11-18T20:00:00Z",
+                    session=session,
+                    sleep_fn=self.sleep,
+                )
+
+            self.assertEqual(ctx.exception.status_code, status)
+            self.assertEqual(len(session.calls), 1)
+            self.assertEqual(self.sleeps, [])
+
+    def test_upload_200_is_not_success(self):
+        session = FakeSession([FakeResponse(200, {"key": "nope"})])
+
+        with self.assertRaises(http.ClientError) as ctx:
+            http.upload_audio(
+                "https://atisrelay.com",
+                "station-token-value",
+                "KMYF",
+                self.mp3,
+                "2026-11-18T20:00:00Z",
+                session=session,
+                sleep_fn=self.sleep,
+            )
+
+        self.assertEqual(ctx.exception.status_code, 200)
+        self.assertEqual(len(session.calls), 1)
+
+    def test_upload_retries_429_then_succeeds(self):
+        session = FakeSession([
+            FakeResponse(429, text="rate limited"),
+            FakeResponse(201, {"key": "raw_atc_stream/KMYF/clip.mp3", "icao": "KMYF", "received_at": "2026-11-18T20:00:05Z"}),
+        ])
+        key, body = http.upload_audio(
+            "https://atisrelay.com",
+            "station-token-value",
+            "KMYF",
+            self.mp3,
+            "2026-11-18T20:00:00Z",
+            session=session,
+            sleep_fn=self.sleep,
+            retry_delays=(0.01,),
+        )
+        self.assertEqual(key, "raw_atc_stream/KMYF/clip.mp3")
+        self.assertEqual(body["icao"], "KMYF")
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(self.sleeps, [0.01])
 
     def test_upload_retries_5xx_then_succeeds(self):
         session = FakeSession([
@@ -210,9 +275,11 @@ class HeartbeatHttpTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.prev_state = os.environ.get("PI_ATC_STATE_DIR")
         self.prev_token = os.environ.get("STATION_TOKEN")
+        self.prev_tokens = os.environ.get("STATION_TOKENS")
         self.prev_stations = os.environ.get("STATIONS")
         os.environ["PI_ATC_STATE_DIR"] = self.tmpdir.name
         os.environ["STATION_TOKEN"] = "tok"
+        os.environ.pop("STATION_TOKENS", None)
         os.environ["STATIONS"] = "KMYF:126.8"
         self.reboots = []
 
@@ -228,6 +295,12 @@ class HeartbeatHttpTest(unittest.TestCase):
 
         else:
             os.environ["STATION_TOKEN"] = self.prev_token
+
+        if self.prev_tokens is None:
+            os.environ.pop("STATION_TOKENS", None)
+
+        else:
+            os.environ["STATION_TOKENS"] = self.prev_tokens
 
         if self.prev_stations is None:
             os.environ.pop("STATIONS", None)
@@ -267,6 +340,50 @@ class HeartbeatHttpTest(unittest.TestCase):
         )
         self.assertEqual(self.reboots, [])
         self.assertEqual(status["commands"]["fetch"], "access_denied")
+
+    def test_http_uses_token_per_icao(self):
+        import heartbeat
+
+        os.environ.pop("STATION_TOKEN", None)
+        os.environ["STATION_TOKENS"] = "KMYF:tok-myf,KSEE:tok-see"
+        os.environ["STATIONS"] = "KMYF:126.8,KSEE:135.1"
+        session = FakeSession([
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": []}),
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": []}),
+        ])
+        heartbeat.run_http_checkin(
+            reboot_fn=lambda: self.reboots.append("nope"),
+            session=session,
+            sleep_fn=lambda _s: None,
+            pi_id="test-pi",
+        )
+        self.assertEqual(self.reboots, [])
+        self.assertEqual(session.calls[0]["url"], "https://atisrelay.com/api/pi/KMYF/heartbeat")
+        self.assertEqual(session.calls[0]["headers"]["Authorization"], "Bearer tok-myf")
+        self.assertEqual(session.calls[0]["json"]["last_error"], None)
+        self.assertIn("capture_status", session.calls[0]["json"])
+        self.assertEqual(session.calls[1]["url"], "https://atisrelay.com/api/pi/KMYF/commands")
+        self.assertEqual(session.calls[2]["url"], "https://atisrelay.com/api/pi/KSEE/heartbeat")
+        self.assertEqual(session.calls[2]["headers"]["Authorization"], "Bearer tok-see")
+        self.assertEqual(session.calls[3]["url"], "https://atisrelay.com/api/pi/KSEE/commands")
+
+    def test_shared_token_is_not_used_for_two_icaos(self):
+        import heartbeat
+
+        os.environ["STATION_TOKEN"] = "shared-token"
+        os.environ.pop("STATION_TOKENS", None)
+        os.environ["STATIONS"] = "KMYF:126.8,KSEE:135.1"
+        session = FakeSession([])
+        status = heartbeat.run_http_checkin(
+            reboot_fn=lambda: self.reboots.append("nope"),
+            session=session,
+            sleep_fn=lambda _s: None,
+            pi_id="test-pi",
+        )
+        self.assertEqual(session.calls, [])
+        self.assertEqual(status["commands"]["fetch"], "skipped")
 
 
 if __name__ == "__main__":

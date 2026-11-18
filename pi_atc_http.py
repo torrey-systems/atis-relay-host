@@ -15,6 +15,12 @@ class AuthRejected(Exception):
         self.status_code = status_code
 
 
+class Forbidden(Exception):
+    def __init__(self, status_code=403):
+        super().__init__("station token is for a different ICAO (HTTP %s)" % status_code)
+        self.status_code = status_code
+
+
 class TransientError(Exception):
     pass
 
@@ -28,6 +34,13 @@ class ClientError(Exception):
             super().__init__("HTTP %s" % status_code)
 
         self.status_code = status_code
+
+
+CLIENT_ERROR_MESSAGES = {
+    404: "unknown ICAO (HTTP 404)",
+    413: "audio too large (HTTP 413)",
+    422: "invalid audio upload (HTTP 422)",
+}
 
 
 def bearer_headers(token):
@@ -67,11 +80,9 @@ def _request(session, method, url, retry_delays, sleep_fn, timeout, **kwargs):
             continue
 
         status = response.status_code
+        action = _auth_or_retry(status)
 
-        if status in (401, 403):
-            raise AuthRejected(status)
-
-        if status in RETRY_STATUSES:
+        if action == "retry":
             if attempt >= len(delays):
                 raise TransientError("ATIS Relay returned HTTP %s" % status)
 
@@ -80,6 +91,19 @@ def _request(session, method, url, retry_delays, sleep_fn, timeout, **kwargs):
             continue
 
         return response
+
+
+def _auth_or_retry(status):
+    if status == 401:
+        raise AuthRejected(status)
+
+    if status == 403:
+        raise Forbidden(status)
+
+    if status in RETRY_STATUSES:
+        return "retry"
+
+    return "other"
 
 
 def _json_body(response):
@@ -149,11 +173,9 @@ def upload_audio(
                 continue
 
         status = response.status_code
+        action = _auth_or_retry(status)
 
-        if status in (401, 403):
-            raise AuthRejected(status)
-
-        if status in RETRY_STATUSES:
+        if action == "retry":
             if attempt >= len(delays):
                 raise TransientError("ATIS Relay returned HTTP %s" % status)
 
@@ -161,12 +183,15 @@ def upload_audio(
             attempt += 1
             continue
 
-        if status not in (200, 201):
-            raise ClientError(status, "audio upload HTTP %s" % status)
+        if status == 201:
+            body = _json_body(response)
+            key = body.get("key") or filename
+            return key, body
 
-        body = _json_body(response)
-        key = body.get("key") or body.get("url") or filename
-        return key, body
+        if status in CLIENT_ERROR_MESSAGES:
+            raise ClientError(status, CLIENT_ERROR_MESSAGES[status])
+
+        raise ClientError(status, "audio upload HTTP %s" % status)
 
 
 def post_heartbeat(

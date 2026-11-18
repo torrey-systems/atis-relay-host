@@ -76,6 +76,7 @@ jobs:
           test -f /lib/systemd/system/pi-atc.service
           grep -q 'EnvironmentFile=-/etc/pi-atc/env' /lib/systemd/system/pi-atc.service
           grep -q '^STATION_TOKEN=$' /etc/pi-atc/env
+          grep -q '^STATION_TOKENS=$' /etc/pi-atc/env
           python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config'
           out=$(printf 'smoke-token-not-for-prod\n' | pi-atc set-key 2>&1) || true
           printf '%s\n' "$out"

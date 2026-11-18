@@ -10,6 +10,7 @@ LEGACY_ENV_PATH = "/opt/pi-atc/.env"
 DEFAULT_ATIS_RELAY_URL = "https://atisrelay.com"
 SECRET_KEYS = (
     "STATION_TOKEN",
+    "STATION_TOKENS",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AP_PASSWORD",
@@ -17,6 +18,7 @@ SECRET_KEYS = (
 MIGRATE_KEYS = (
     "ATIS_RELAY_URL",
     "STATION_TOKEN",
+    "STATION_TOKENS",
     "STATIONS",
     "PI_ID",
     "AUDIO_DEVICE",
@@ -97,6 +99,106 @@ def station_token(environ=None):
     return ""
 
 
+def parse_station_tokens(raw):
+    tokens = {}
+
+    if not raw:
+        return tokens
+
+    for entry in raw.split(","):
+        entry = entry.strip()
+
+        if ":" not in entry:
+            continue
+
+        icao, token = entry.split(":", 1)
+        icao = icao.strip().upper()
+        token = token.strip()
+
+        if icao and token:
+            tokens[icao] = token
+
+    return tokens
+
+
+def format_station_tokens(tokens):
+    parts = []
+
+    for icao in sorted(tokens):
+        token = tokens[icao]
+
+        if icao and token:
+            parts.append("%s:%s" % (icao, token))
+
+    return ",".join(parts)
+
+
+def token_map_from_env(environ=None):
+    if environ is None:
+        environ = os.environ
+
+    tokens = parse_station_tokens(environ.get("STATION_TOKENS", ""))
+    stations = stations_from_env(environ)
+    shorthand = station_token(environ)
+
+    if shorthand and len(stations) == 1:
+        icao = stations[0][0]
+
+        if icao not in tokens:
+            tokens[icao] = shorthand
+
+    return tokens
+
+
+def station_token_for(icao, environ=None):
+    if not icao:
+        return ""
+
+    return token_map_from_env(environ).get(str(icao).strip().upper(), "")
+
+
+def set_station_token(path, token, icao=None):
+    data = read_env_file(path)
+    stations = parse_stations(data.get("STATIONS", ""))
+    icaos = [item[0] for item in stations]
+    tokens = parse_station_tokens(data.get("STATION_TOKENS", ""))
+
+    if icao:
+        icao = icao.strip().upper()
+
+        if not icao:
+            return "icao is required"
+
+        tokens[icao] = token
+
+    else:
+        if len(icaos) > 1:
+            return "more than one station configured; use: sudo pi-atc set-key --icao %s" % icaos[0]
+
+        if len(icaos) == 1:
+            tokens[icaos[0]] = token
+
+        else:
+            data["STATION_TOKEN"] = token
+            data["STATION_TOKENS"] = format_station_tokens(tokens)
+            write_env_file(path, data)
+            return None
+
+    data["STATION_TOKENS"] = format_station_tokens(tokens)
+
+    if len(icaos) <= 1 and len(tokens) == 1:
+        data["STATION_TOKEN"] = next(iter(tokens.values()))
+
+    else:
+        data["STATION_TOKEN"] = ""
+
+    if "ATIS_RELAY_URL" not in data:
+        data["ATIS_RELAY_URL"] = DEFAULT_ATIS_RELAY_URL
+
+    write_env_file(path, data)
+    return None
+
+
 def atis_relay_url(environ=None):
     if environ is None:
         environ = os.environ
@@ -120,7 +222,10 @@ def has_legacy_aws(environ=None):
 
 
 def upload_mode(environ=None):
-    if station_token(environ):
+    if token_map_from_env(environ):
+        return "http"
+
+    if station_token(environ) and len(stations_from_env(environ)) <= 1:
         return "http"
 
     if has_legacy_aws(environ):
@@ -133,12 +238,7 @@ def mask_secret(value):
     if not value:
         return "not set"
 
-    text = str(value)
-
-    if len(text) <= 4:
-        return "set (****)"
-
-    return "set (****%s)" % text[-4:]
+    return "set"
 
 
 def read_env_file(path):
@@ -231,6 +331,9 @@ def migrate_legacy_env(legacy_path=None, dest_path=None):
 
     if "STATION_TOKEN" not in dest:
         dest["STATION_TOKEN"] = ""
+
+    if "STATION_TOKENS" not in dest:
+        dest["STATION_TOKENS"] = ""
 
     if copied or not os.path.isfile(dest_path):
         write_env_file(dest_path, dest)

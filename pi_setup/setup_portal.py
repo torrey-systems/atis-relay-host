@@ -2,8 +2,12 @@
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from flask import Flask, request, redirect
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pi_atc_config import format_station_tokens, parse_station_tokens, parse_stations
 
 APP_DIR = Path("/opt/pi-atc")
 DEFAULT_ENV_PATH = Path("/etc/pi-atc/env")
@@ -66,6 +70,9 @@ button:hover{background:#2563eb}
     <input id="freq1" name="freq1" required placeholder="124.35"
       inputmode="decimal" pattern="[0-9]{3}\\.[0-9]{1,3}" maxlength="7" value="{{FREQ1}}">
 
+    <label for="station_key1">Station 1 key <span style="font-weight:400;text-transform:none">(optional; leave blank to keep the current key)</span></label>
+    <input id="station_key1" name="station_key1" type="password" autocomplete="off">
+
     <label for="icao2">Station 2 &mdash; Airport Code <span style="font-weight:400;text-transform:none">(optional)</span></label>
     <input id="icao2" name="icao2" placeholder="KCRQ" maxlength="4"
       pattern="[A-Za-z0-9]{3,4}" value="{{ICAO2}}">
@@ -74,8 +81,8 @@ button:hover{background:#2563eb}
     <input id="freq2" name="freq2" placeholder="119.60"
       inputmode="decimal" pattern="[0-9]{3}\\.[0-9]{1,3}" maxlength="7" value="{{FREQ2}}">
 
-    <label for="station_key">Station key <span style="font-weight:400;text-transform:none">(optional; leave blank to keep the current key)</span></label>
-    <input id="station_key" name="station_key" type="password" autocomplete="off">
+    <label for="station_key2">Station 2 key <span style="font-weight:400;text-transform:none">(optional; leave blank to keep the current key)</span></label>
+    <input id="station_key2" name="station_key2" type="password" autocomplete="off">
 
     <button type="submit">Save &amp; Connect</button>
   </form>
@@ -131,10 +138,11 @@ def validate_freq(val):
         return False
 
 
-def write_env(stations, station_key=None):
+def write_env(stations, keys=None):
     existing = {}
     path = env_file_path()
     sources = []
+    keys = keys or {}
 
     if path.exists():
         sources.append(path)
@@ -153,13 +161,32 @@ def write_env(stations, station_key=None):
                 if key not in existing or existing.get(key) == "":
                     existing[key] = v.strip()
 
+    old_stations = parse_stations(existing.get("STATIONS", ""))
+    tokens = parse_station_tokens(existing.get("STATION_TOKENS", ""))
+    shorthand = (existing.get("STATION_TOKEN") or "").strip()
+
+    if shorthand and len(old_stations) == 1 and old_stations[0][0] not in tokens:
+        tokens[old_stations[0][0]] = shorthand
+
+    for icao, token in keys.items():
+        if icao and token:
+            tokens[icao] = token
+
     existing["STATIONS"] = ",".join(f"{icao}:{freq}" for icao, freq in stations)
 
     if "ATIS_RELAY_URL" not in existing or existing.get("ATIS_RELAY_URL") == "":
         existing["ATIS_RELAY_URL"] = "https://atisrelay.com"
 
-    if station_key:
-        existing["STATION_TOKEN"] = station_key
+    existing["STATION_TOKENS"] = format_station_tokens(tokens)
+
+    if len(stations) == 1 and stations[0][0] in tokens:
+        existing["STATION_TOKEN"] = tokens[stations[0][0]]
+
+    elif len(stations) <= 1 and len(tokens) == 1:
+        existing["STATION_TOKEN"] = next(iter(tokens.values()))
+
+    else:
+        existing["STATION_TOKEN"] = ""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -202,7 +229,8 @@ def submit():
     freq1 = request.form.get("freq1", "").strip()
     icao2 = request.form.get("icao2", "").strip().upper()
     freq2 = request.form.get("freq2", "").strip()
-    station_key = request.form.get("station_key", "").strip()
+    station_key1 = request.form.get("station_key1", "").strip()
+    station_key2 = request.form.get("station_key2", "").strip()
     fields = dict(ssid=ssid, icao1=icao1, freq1=freq1, icao2=icao2, freq2=freq2)
 
     if not ssid or not psk:
@@ -225,7 +253,15 @@ def submit():
 
         stations.append((icao2, freq2))
 
-    write_env(stations, station_key=station_key or None)
+    keys = {}
+
+    if station_key1:
+        keys[icao1] = station_key1
+
+    if icao2 and station_key2:
+        keys[icao2] = station_key2
+
+    write_env(stations, keys=keys)
     configure_wifi(ssid, psk)
 
     subprocess.Popen(["bash", "-c", "sleep 3 && reboot"], close_fds=True)

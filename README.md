@@ -14,13 +14,15 @@ sudo apt install ./atis-relay-host_<ver>_all.deb
 
 Replace `<ver>` with the version on the file, for example `0.1.0`.
 
-Then set the station key issued by ATIS Relay:
+Then set the station key issued by ATIS Relay. A key is scoped to one airport. If this Pi serves two airports, set a key for each:
 
 ```bash
 sudo pi-atc set-key
+sudo pi-atc set-key --icao KMYF
+sudo pi-atc set-key --icao KSEE
 ```
 
-The command reads the key from the argument or from stdin and does not print it. You can also pipe it:
+`--icao` is optional when only one station is configured. The command reads the key from the argument or from stdin and does not print it. You can also pipe it:
 
 ```bash
 printf '%s\n' "$STATION_TOKEN" | sudo pi-atc set-key
@@ -32,7 +34,7 @@ Check configuration without printing the key:
 sudo pi-atc status
 ```
 
-On first boot with no saved WiFi, the Pi raises a setup access point named **ATIS Relay Setup** (password `aviation`). Join it, open the captive portal, and enter WiFi plus station ICAO and frequency. The station key field is optional; leave it blank to keep a key already on the device.
+On first boot with no saved WiFi, the Pi raises a setup access point named **ATIS Relay Setup** (password `aviation`). Join it, open the captive portal, and enter WiFi plus station ICAO and frequency. Each station has its own key field; leave a field blank to keep a key already on the device.
 
 ## Layout
 
@@ -51,7 +53,8 @@ Edit `/etc/pi-atc/env` or use `pi-atc set-key` and the setup portal.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `STATION_TOKEN` | Station key from ATIS Relay | (set with `pi-atc set-key`) |
+| `STATION_TOKEN` | Station key from ATIS Relay when this Pi serves one airport | (set with `pi-atc set-key`) |
+| `STATION_TOKENS` | Per-airport keys when this Pi serves two airports | `KMYF:<token>,KSEE:<token>` |
 | `ATIS_RELAY_URL` | Relay base URL | `https://atisrelay.com` |
 | `STATIONS` | Comma-separated `ICAO:FREQ` pairs | `KSAN:124.350,KCRQ:119.600` |
 | `PI_ID` | Optional stable device id. Defaults to the hostname. | `nkx-relay` |
@@ -62,19 +65,19 @@ Edit `/etc/pi-atc/env` or use `pi-atc set-key` and the setup portal.
 
 If `/opt/pi-atc/.env` exists from an older install, the package copies unset keys such as `STATIONS` and `PI_ID` into `/etc/pi-atc/env` without printing values.
 
-The uploader and heartbeat wait and log when no station key is configured. They do not crash-loop. After a 401 or 403 they stop uploading and log that a valid key must be set with `sudo pi-atc set-key`.
+The uploader and heartbeat wait and log when no station key is configured. They do not crash-loop. Heartbeat and command polling use that airport's token for each configured ICAO. After a 401 they stop using that token until a valid key is set with `sudo pi-atc set-key`. Audio 403 means the token belongs to a different airport.
 
 ## Uploads, heartbeat, and commands
 
-With `STATION_TOKEN` set, the Pi talks to ATIS Relay over HTTPS:
+With a station key set, the Pi talks to ATIS Relay over HTTPS using `Authorization: Bearer <token>`:
 
-- `POST {ATIS_RELAY_URL}/api/pi/{ICAO}/audio` with `Authorization: Bearer <token>`, multipart field `file` (MP3, same `ICAO_` tempfile name as before) and form field `recorded_at` (UTC ISO8601). Success is HTTP 201.
-- `POST /api/pi/{ICAO}/heartbeat` about every 5 minutes.
-- `GET /api/pi/{ICAO}/commands` and `POST /api/pi/{ICAO}/commands/{id}/ack`.
+- `POST {ATIS_RELAY_URL}/api/pi/{ICAO}/audio` multipart field `file` (MP3, same `ICAO_` tempfile name as before) and form field `recorded_at` (UTC ISO8601). Success is HTTP 201 `{key, icao, received_at}`. 10 MB cap. 30 uploads per station per minute.
+- `POST /api/pi/{ICAO}/heartbeat` about every 5 minutes with `temp_c`, `throttled_flags`, `uptime_seconds`, `capture_status`, and `last_error`. Success is HTTP 200 `{"ok": true}`.
+- `GET /api/pi/{ICAO}/commands` returns `{commands: [{id, command, queued_at, expires_at}]}` where command is `restart_capture`, `usb_reset`, or `reboot`. `POST /api/pi/{ICAO}/commands/{id}/ack` with `{ok, result}`.
 
-A 5xx or network error is retried with backoff. 401 and 403 are not retried.
+Audio 401 is a bad token. Audio 403 is a token for a different ICAO. Heartbeat and commands return 401 when a valid token is used on another ICAO. 404 unknown ICAO, 413 too large, and 422 invalid file or recorded_at are not retried. 429 (plain text, back off) and 503 `upload_failed` are retried.
 
-Legacy S3 uploads (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` to `s3://ownnav-maps`) remain only when those keys are present and `STATION_TOKEN` is empty, so existing factory Pis keep working until they are migrated. That path is deprecated. New installs should use a station key. `python3-boto3` is optional for the legacy path only.
+Legacy S3 uploads (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` to `s3://ownnav-maps`) remain only when those keys are present and no station token is configured, so existing factory Pis keep working until they are migrated. That path is deprecated. New installs should use a station key. `python3-boto3` is optional for the legacy path only.
 
 ## Hardware
 
