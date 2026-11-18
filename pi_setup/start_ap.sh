@@ -5,10 +5,15 @@ IFACE="wlan0"
 AP_IP="192.168.4.1"
 AP_SSID="ATIS Relay Setup"
 AP_PSK="aviation"
-if [ -f /opt/pi-atc/.env ]; then
-    AP_OVERRIDE=$(grep '^AP_PASSWORD=' /opt/pi-atc/.env 2>/dev/null | cut -d= -f2- || true)
-    [ -n "$AP_OVERRIDE" ] && AP_PSK="$AP_OVERRIDE"
-fi
+for ENV_FILE in /etc/pi-atc/env /opt/pi-atc/.env; do
+    if [ -f "$ENV_FILE" ]; then
+        AP_OVERRIDE=$(grep '^AP_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        if [ -n "$AP_OVERRIDE" ]; then
+            AP_PSK="$AP_OVERRIDE"
+            break
+        fi
+    fi
+done
 HOSTAPD_CONF="/tmp/pi-atc-hostapd.conf"
 DNSMASQ_CONF="/tmp/pi-atc-dnsmasq.conf"
 

@@ -7,8 +7,11 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 INSTALL_DIR="/opt/pi-atc"
+ENV_DIR="/etc/pi-atc"
+ENV_FILE="${ENV_DIR}/env"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
+UNIT_DIR="/lib/systemd/system"
 
 echo "[install] Setting WiFi country code..."
 raspi-config nonint do_wifi_country US
@@ -43,7 +46,7 @@ apt-get install -y -qq \
     python3-flask \
     python3-dotenv \
     python3-numpy \
-    python3-boto3 \
+    python3-requests \
     rtl-sdr \
     ffmpeg \
     iptables
@@ -55,29 +58,51 @@ systemctl disable dnsmasq 2>/dev/null || true
 systemctl unmask hostapd 2>/dev/null || true
 
 echo "[install] Copying project to ${INSTALL_DIR}..."
-mkdir -p "$INSTALL_DIR" /var/lib/pi-atc /var/log/journal
-cp "$REPO_DIR/audio_uploader.py" "$INSTALL_DIR/"
-cp "$REPO_DIR/heartbeat.py" "$INSTALL_DIR/"
-cp "$REPO_DIR/pi_atc_state.py" "$INSTALL_DIR/"
+mkdir -p "$INSTALL_DIR" /var/lib/pi-atc /var/log/journal "$ENV_DIR"
+for src in "$REPO_DIR"/*.py; do
+    cp "$src" "$INSTALL_DIR/"
+done
 rm -rf "$INSTALL_DIR/pi_setup"
 cp -r "$SCRIPT_DIR" "$INSTALL_DIR/pi_setup"
 chmod +x "$INSTALL_DIR/pi_setup/"*.sh
 
-if git -C "$REPO_DIR" rev-parse HEAD >/dev/null 2>&1; then
+if [ -f "$REPO_DIR/VERSION" ]; then
+    cp "$REPO_DIR/VERSION" "$INSTALL_DIR/VERSION"
+elif git -C "$REPO_DIR" rev-parse HEAD >/dev/null 2>&1; then
     git -C "$REPO_DIR" rev-parse HEAD > "$INSTALL_DIR/VERSION"
 else
     printf 'unknown\n' > "$INSTALL_DIR/VERSION"
 fi
 
-if [ -f "$REPO_DIR/.env" ]; then
-    cp "$REPO_DIR/.env" "$INSTALL_DIR/.env"
-elif [ ! -f "$INSTALL_DIR/.env" ]; then
-    cat > "$INSTALL_DIR/.env" <<EOF
-AWS_DEFAULT_REGION=us-east-2
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
+if [ -f "$REPO_DIR/packaging/pi-atc" ]; then
+    install -m 755 "$REPO_DIR/packaging/pi-atc" /usr/bin/pi-atc
+else
+    cat > /usr/bin/pi-atc <<'EOF'
+#!/usr/bin/python3
+import sys
+sys.path.insert(0, "/opt/pi-atc")
+from pi_atc_cli import main
+sys.exit(main())
 EOF
-    echo "[install] Created skeleton .env -- add AWS credentials before distributing"
+    chmod 755 /usr/bin/pi-atc
+fi
+
+if [ -f "$REPO_DIR/.env" ] && [ ! -f "$ENV_FILE" ]; then
+    mkdir -p "$ENV_DIR"
+    cp "$REPO_DIR/.env" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+elif [ -f "$INSTALL_DIR/.env" ] && [ ! -f "$ENV_FILE" ]; then
+    python3 "$INSTALL_DIR/pi_atc_config.py" migrate || true
+elif [ ! -f "$ENV_FILE" ]; then
+    cat > "$ENV_FILE" <<EOF
+ATIS_RELAY_URL=https://atisrelay.com
+STATION_TOKEN=
+STATION_TOKENS=
+STATIONS=
+PI_ID=
+EOF
+    chmod 600 "$ENV_FILE"
+    echo "[install] Created skeleton ${ENV_FILE}; set a station key with: sudo pi-atc set-key"
 fi
 
 echo "[install] Removing install-time WiFi connection..."
@@ -89,12 +114,12 @@ nmcli --fields NAME connection show | tail -n +2 | while read -r NAME; do
 done
 
 echo "[install] Installing systemd services..."
-install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-setup.service" /etc/systemd/system/pi-atc-setup.service
-install -m 644 "$INSTALL_DIR/pi_setup/pi-atc.service" /etc/systemd/system/pi-atc.service
-install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-heartbeat.service" /etc/systemd/system/pi-atc-heartbeat.service
-install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-heartbeat.timer" /etc/systemd/system/pi-atc-heartbeat.timer
-install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-reboot.service" /etc/systemd/system/pi-atc-reboot.service
-install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-reboot.timer" /etc/systemd/system/pi-atc-reboot.timer
+install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-setup.service" "${UNIT_DIR}/pi-atc-setup.service"
+install -m 644 "$INSTALL_DIR/pi_setup/pi-atc.service" "${UNIT_DIR}/pi-atc.service"
+install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-heartbeat.service" "${UNIT_DIR}/pi-atc-heartbeat.service"
+install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-heartbeat.timer" "${UNIT_DIR}/pi-atc-heartbeat.timer"
+install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-reboot.service" "${UNIT_DIR}/pi-atc-reboot.service"
+install -m 644 "$INSTALL_DIR/pi_setup/pi-atc-reboot.timer" "${UNIT_DIR}/pi-atc-reboot.timer"
 
 echo "[install] Installing journal and NetworkManager config..."
 mkdir -p /etc/systemd/journald.conf.d /etc/NetworkManager/conf.d
@@ -104,6 +129,7 @@ systemctl restart systemd-journald 2>/dev/null || true
 nmcli general reload 2>/dev/null || true
 
 systemctl daemon-reload
+systemctl enable pi-atc.service
 systemctl enable pi-atc-setup.service
 systemctl enable pi-atc-heartbeat.timer
 systemctl enable pi-atc-reboot.timer
@@ -113,6 +139,8 @@ echo "  1. Wait up to 2 min for WiFi"
 echo "  2. If no WiFi: start AP 'ATIS Relay Setup' with captive portal"
 echo "  3. If WiFi OK: start audio uploader"
 echo "  4. If WiFi drops for 2 min: switch to AP mode, retry known WiFi every 5 min (45s connect wait)"
-echo "  5. Check in to S3 every 5 min and reboot nightly at 03:00 America/Los_Angeles"
+echo "  5. Check in to ATIS Relay every 5 min and reboot nightly at 03:00 America/Los_Angeles"
 echo ""
-echo "Bake your shared AWS credentials into ${INSTALL_DIR}/.env before distributing the image."
+echo "Code lives in ${INSTALL_DIR}. Config is ${ENV_FILE}. State is /var/lib/pi-atc."
+echo "Set a station key with: sudo pi-atc set-key"
+echo "This script is for baking factory images. End users should install the .deb package."

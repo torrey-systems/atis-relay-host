@@ -1,0 +1,80 @@
+name: atis-relay-host
+arch: all
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Torrey Systems <deploy@atisrelay.com>
+homepage: https://atisrelay.com
+description: |-
+  ATIS Relay Raspberry Pi station
+  Records aviation frequencies with an RTL-SDR and uploads unique ATIS clips to ATIS Relay over HTTPS.
+depends:
+  - python3 (>= 3.10)
+  - python3-flask
+  - python3-dotenv
+  - python3-numpy
+  - python3-requests
+  - rtl-sdr
+  - ffmpeg
+  - hostapd
+  - dnsmasq
+  - iptables
+suggests:
+  - python3-boto3
+contents:
+  - src: VERSION
+    dst: /opt/pi-atc/VERSION
+  - src: audio_uploader.py
+    dst: /opt/pi-atc/audio_uploader.py
+  - src: heartbeat.py
+    dst: /opt/pi-atc/heartbeat.py
+  - src: pi_atc_state.py
+    dst: /opt/pi-atc/pi_atc_state.py
+  - src: pi_atc_config.py
+    dst: /opt/pi-atc/pi_atc_config.py
+  - src: pi_atc_http.py
+    dst: /opt/pi-atc/pi_atc_http.py
+  - src: pi_atc_cli.py
+    dst: /opt/pi-atc/pi_atc_cli.py
+  - src: pi_setup
+    dst: /opt/pi-atc/pi_setup
+  - src: packaging/pi-atc
+    dst: /usr/bin/pi-atc
+    file_info:
+      mode: 0755
+  - src: packaging/env
+    dst: /etc/pi-atc/env
+    type: config
+    file_info:
+      mode: 0600
+  - src: pi_setup/pi-atc.service
+    dst: /lib/systemd/system/pi-atc.service
+  - src: pi_setup/pi-atc-setup.service
+    dst: /lib/systemd/system/pi-atc-setup.service
+  - src: pi_setup/pi-atc-heartbeat.service
+    dst: /lib/systemd/system/pi-atc-heartbeat.service
+  - src: pi_setup/pi-atc-heartbeat.timer
+    dst: /lib/systemd/system/pi-atc-heartbeat.timer
+  - src: pi_setup/pi-atc-reboot.service
+    dst: /lib/systemd/system/pi-atc-reboot.service
+  - src: pi_setup/pi-atc-reboot.timer
+    dst: /lib/systemd/system/pi-atc-reboot.timer
+  - src: pi_setup/journald-pi-atc.conf
+    dst: /etc/systemd/journald.conf.d/pi-atc.conf
+    type: config
+  - src: pi_setup/wifi-powersave-off.conf
+    dst: /etc/NetworkManager/conf.d/wifi-powersave-off.conf
+    type: config
+  - src: README.md
+    dst: /usr/share/doc/atis-relay-host/README.md
+  - src: packaging/copyright
+    dst: /usr/share/doc/atis-relay-host/copyright
+  - src: packaging/changelog.Debian.gz
+    dst: /usr/share/doc/atis-relay-host/changelog.Debian.gz
+  - src: packaging/lintian-overrides
+    dst: /usr/share/lintian/overrides/atis-relay-host
+scripts:
+  postinstall: packaging/postinst
+  preremove: packaging/prerm
+  postremove: packaging/postrm

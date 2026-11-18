@@ -166,6 +166,19 @@ class HeartbeatTest(unittest.TestCase):
         self.assertEqual(status["pending_command"]["id"], command["id"])
         self.assertIsNone(status["last_command"])
 
+    def test_http_payload_fields(self):
+        payload = heartbeat.heartbeat_payload_from_status({
+            "cpu_temp_c": 48.5,
+            "throttled": "0x50000",
+            "uptime_seconds": 12.9,
+            "pi_atc_service": {"active": "active"},
+        })
+        self.assertEqual(payload["temp_c"], 48.5)
+        self.assertEqual(payload["throttled_flags"], 0x50000)
+        self.assertEqual(payload["uptime_seconds"], 12)
+        self.assertEqual(payload["capture_status"], "running")
+        self.assertIsNone(payload["last_error"])
+
 
 if __name__ == "__main__":
     unittest.main()

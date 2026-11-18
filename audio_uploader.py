@@ -6,35 +6,20 @@ import tempfile
 import subprocess
 import struct
 import math
-import boto3
-from dotenv import load_dotenv
-from pi_atc_state import derive_pi_id, record_last_upload
-load_dotenv()
-required_env_vars = [
-    'AWS_ACCESS_KEY_ID',
-    'AWS_SECRET_ACCESS_KEY',
-    'STATIONS'
-]
+from pi_atc_config import (
+    atis_relay_url,
+    load_config,
+    parse_stations,
+    station_token_for,
+    upload_mode,
+)
+from pi_atc_state import derive_pi_id, record_last_upload, utc_now_iso
 
-missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
-if missing_vars:
-    print("[error] Missing required environment variables:", missing_vars)
-    exit(1)
+WAIT_SEC = 60
 
-def parse_stations(raw):
-    stations = []
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if ":" not in entry:
-            continue
-        icao, freq = entry.split(":", 1)
-        stations.append((icao.strip().upper(), freq.strip()))
-    return stations
+load_config()
 
 STATIONS = parse_stations(os.environ.get("STATIONS", ""))
-if not STATIONS:
-    print("[error] STATIONS must contain at least one ICAO:FREQ pair")
-    exit(1)
 
 AUDIO_DEVICE = os.environ.get("AUDIO_DEVICE", ":0" if sys.platform == "darwin" else "plughw:1,0")
 SAMPLE_RATE = int(os.environ.get("SAMPLE_RATE", "16000"))
@@ -215,9 +200,104 @@ def record_wav(out_path: str, freq_mhz: str) -> bool:
         print(f"[capture] {e}")
         return False
 
-s3 = boto3.client("s3", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-2"))
 bucket = "ownnav-maps"
 prefix = "raw_atc_stream/"
+_s3 = None
+_rejected_tokens = {}
+
+
+def s3_client():
+    global _s3
+
+    if _s3 is None:
+        import boto3
+        _s3 = boto3.client("s3", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-2"))
+
+    return _s3
+
+
+def wait_for_config():
+    global STATIONS
+
+    while True:
+        load_config()
+        STATIONS = parse_stations(os.environ.get("STATIONS", ""))
+        mode = upload_mode()
+
+        if STATIONS and mode != "none":
+            return mode
+
+        if not STATIONS:
+            print("[wait] no stations configured; set them in the setup portal or /etc/pi-atc/env")
+
+        else:
+            hint = STATIONS[0][0] if STATIONS else "ICAO"
+            print("[wait] station token not configured; set a key with: sudo pi-atc set-key --icao %s" % hint)
+
+        time.sleep(WAIT_SEC)
+
+
+def upload_file_s3(mp3_path: str, icao: str) -> str | None:
+    key = prefix + icao + "/" + os.path.basename(mp3_path)
+
+    try:
+        s3_client().upload_file(mp3_path, bucket, key)
+
+    except Exception as e:
+        print(f"[error] Failed to upload file: {e}")
+        return None
+
+    url = f"https://{bucket}.s3.amazonaws.com/{key}"
+    print(f"[upload] {url}")
+    return key
+
+
+def upload_file_http(mp3_path: str, icao: str) -> str | None:
+    from pi_atc_http import AuthRejected, ClientError, Forbidden, TransientError, upload_audio
+
+    token = station_token_for(icao)
+
+    if not token:
+        print("[wait] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        return None
+
+    if _rejected_tokens.get(icao) == token:
+        print("[wait] %s: station token rejected; set a valid key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        return None
+
+    filename = os.path.basename(mp3_path)
+    recorded_at = utc_now_iso()
+
+    try:
+        key, _body = upload_audio(
+            atis_relay_url(),
+            token,
+            icao,
+            mp3_path,
+            recorded_at,
+            filename=filename,
+        )
+        print(f"[upload] {icao} {filename}")
+        return key
+
+    except AuthRejected as exc:
+        _rejected_tokens[icao] = token
+        print("[error] %s: %s; set a valid key with: sudo pi-atc set-key --icao %s" % (icao, exc, icao))
+        return None
+
+    except Forbidden as exc:
+        _rejected_tokens[icao] = token
+        print("[error] %s: %s; set this airport's key with: sudo pi-atc set-key --icao %s" % (icao, exc, icao))
+        return None
+
+    except TransientError as exc:
+        print(f"[error] {icao}: upload retry exhausted: {exc}")
+        return None
+
+    except ClientError as exc:
+        print(f"[error] {icao}: {exc}")
+        return None
+
 
 def upload_file(path: str, icao: str) -> str | None:
     mp3_path = os.path.splitext(path)[0] + ".mp3"
@@ -234,12 +314,16 @@ def upload_file(path: str, icao: str) -> str | None:
             print("[error] ffmpeg conversion failed")
             return None
 
-        key = prefix + icao + "/" + os.path.basename(mp3_path)
-        s3.upload_file(mp3_path, bucket, key)
-        url = f"https://{bucket}.s3.amazonaws.com/{key}"
-        print(f"[upload] {url}")
+        mode = upload_mode()
 
-        return key
+        if mode == "http":
+            return upload_file_http(mp3_path, icao)
+
+        if mode == "s3":
+            return upload_file_s3(mp3_path, icao)
+
+        print("[wait] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        return None
     except Exception as e:
         print(f"[error] Failed to upload file: {e}")
         return None
@@ -255,6 +339,9 @@ def main():
     max_stale_sec = 1800
     usb_disabled = False
     thermal_recovery = False
+    global STATIONS
+
+    wait_for_config()
 
     station_state = {}
     for icao, freq in STATIONS:
@@ -282,6 +369,20 @@ def main():
             else:
                 time.sleep(30)
                 continue
+
+        load_config()
+        STATIONS = parse_stations(os.environ.get("STATIONS", ""))
+
+        if not STATIONS:
+            print("[wait] no stations configured; set them in the setup portal or /etc/pi-atc/env")
+            time.sleep(WAIT_SEC)
+            continue
+
+        if station_idx >= len(STATIONS):
+            station_idx = 0
+
+        for sid, _freq in STATIONS:
+            station_state.setdefault(sid, {"last_upload": 0.0, "prev_envelope": None})
 
         icao, freq = STATIONS[station_idx]
         print(f"[station] {icao} @ {freq} MHz")
