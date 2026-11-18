@@ -1,0 +1,55 @@
+setup.txt
+# NOTE: move directory to /opt/audio_uploader/
+
+
+sudo apt update
+sudo apt install -y alsa-utils python3-pip ffmpeg
+pip3 install numpy requests
+
+
+identify audio device:
+
+arecord -l
+# Note the card,device numbers (e.g., card 1, device 0), then test:
+arecord -D plughw:1,0 -f S16_LE -r 16000 -c 1 -d 3 test.wav && aplay test.wav
+
+Create the app directory and put the script there:
+
+sudo mkdir -p /opt/audio_uploader
+sudo nano /opt/audio_uploader/audio_uploader.py
+sudo chmod +x /opt/audio_uploader/audio_uploader.py
+
+
+3) Run automatically at boot (systemd)
+
+Create a systemd service /etc/systemd/system/audio-uploader.service:
+
+[Unit]
+Description=USB audio listener and conditional uploader
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+EnvironmentFile=/etc/default/audio_uploader
+WorkingDirectory=/opt/audio_uploader
+ExecStart=/usr/bin/python3 /opt/audio_uploader/audio_uploader.py
+Restart=always
+RestartSec=5
+Nice=5
+# Give ALSA access
+SupplementaryGroups=audio
+
+[Install]
+WantedBy=multi-user.target
+
+
+Enable and start:
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now audio-uploader.service
+sudo systemctl status audio-uploader.service
+# Logs:
+journalctl -u audio-uploader.service -f

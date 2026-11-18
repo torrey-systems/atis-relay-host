@@ -1,0 +1,13 @@
+Environment file /etc/default/audio_uploader:
+
+sudo tee /etc/default/audio_uploader >/dev/null <<'EOF'
+ENDPOINT_URL=https://your-endpoint.example.com/upload
+API_KEY=
+AUDIO_DEVICE=plughw:1,0
+SAMPLE_RATE=16000
+CHUNK_SEC=30
+MAX_INTERVAL_SEC=1800
+COSINE_THRESHOLD=0.05
+BANDS=64
+PI_ID=
+EOF

@@ -1,0 +1,18 @@
+*.env
+samples/
+samples_clean/
+
+# secrets and local env (added during rebuild)
+.env
+.env.*
+*.env
+!.env_example
+!.env.example
+*.pem
+*.key
+# python
+__pycache__/
+*.pyc
+VERSION
+# local audio samples
+*.wav

@@ -1,0 +1,12 @@
+[Unit]
+Description=Pi ATC status check-in
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pi-atc
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/pi-atc/.env
+ExecStart=/usr/bin/python3 /opt/pi-atc/heartbeat.py
+Nice=10
+TimeoutStartSec=60

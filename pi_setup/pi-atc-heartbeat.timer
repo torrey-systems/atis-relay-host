@@ -1,0 +1,12 @@
+[Unit]
+Description=Pi ATC status check-in every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

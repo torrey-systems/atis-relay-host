@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi ATC audio uploader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pi-atc
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/pi-atc/audio_uploader.py
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/opt/pi-atc/.env
+
+[Install]
+WantedBy=multi-user.target

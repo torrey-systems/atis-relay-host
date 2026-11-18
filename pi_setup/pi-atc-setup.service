@@ -1,0 +1,14 @@
+[Unit]
+Description=Pi ATC WiFi watchdog and setup portal
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/opt/pi-atc/pi_setup/boot_check.sh
+ExecStopPost=/opt/pi-atc/pi_setup/stop_ap.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

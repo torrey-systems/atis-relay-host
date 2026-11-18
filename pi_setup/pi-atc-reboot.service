@@ -1,0 +1,6 @@
+[Unit]
+Description=Pi ATC nightly reboot
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/reboot
