@@ -100,6 +100,11 @@ def status_label(state):
     return labels.get(state, "Needs attention")
 
 
+def start_stop_enabled(state, worker_active=False):
+    running = bool(worker_active) or state in ("listening", "uploading", "waiting")
+    return (not running, running)
+
+
 def suggestion_for_error(kind):
     mapping = {
         "missing_key": (

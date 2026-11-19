@@ -284,5 +284,16 @@ class IconPackagingTest(unittest.TestCase):
         self.assertIn('icon_file("256x256")', gui)
 
 
+class StartStopButtonsTest(unittest.TestCase):
+    def test_start_disabled_while_listening_stop_disabled_while_stopped(self):
+        self.assertEqual(status.start_stop_enabled("listening"), (False, True))
+        self.assertEqual(status.start_stop_enabled("uploading"), (False, True))
+        self.assertEqual(status.start_stop_enabled("waiting"), (False, True))
+        self.assertEqual(status.start_stop_enabled("stopped"), (True, False))
+        self.assertEqual(status.start_stop_enabled("stopped", True), (False, True))
+        self.assertEqual(status.start_stop_enabled("error"), (True, False))
+        self.assertEqual(status.start_stop_enabled("error", True), (False, True))
+
+
 if __name__ == "__main__":
     unittest.main()

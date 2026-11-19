@@ -19,7 +19,7 @@ from atis_relay_service import (
     start_worker,
     stop_worker,
 )
-from atis_relay_status import format_local_time, read_status, status_label
+from atis_relay_status import format_local_time, read_status, start_stop_enabled, status_label
 from pi_atc_config import (
     apply_runtime_paths,
     env_path,
@@ -253,13 +253,14 @@ class AtisRelayWindow(Gtk.Window):
         self.fix_label.set_line_wrap(True)
         box.pack_start(self.fix_label, False, False, 0)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        start_btn = Gtk.Button.new_with_label("Start")
-        start_btn.connect("clicked", self._on_start)
-        stop_btn = Gtk.Button.new_with_label("Stop")
-        stop_btn.connect("clicked", self._on_stop)
-        row.pack_start(start_btn, False, False, 0)
-        row.pack_start(stop_btn, False, False, 0)
+        self.start_btn = Gtk.Button.new_with_label("Start")
+        self.start_btn.connect("clicked", self._on_start)
+        self.stop_btn = Gtk.Button.new_with_label("Stop")
+        self.stop_btn.connect("clicked", self._on_stop)
+        row.pack_start(self.start_btn, False, False, 0)
+        row.pack_start(self.stop_btn, False, False, 0)
         box.pack_start(row, False, False, 0)
+        self._apply_start_stop_buttons("stopped", False)
         nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         back = Gtk.Button.new_with_label("Back")
         back.connect("clicked", lambda *_a: self.show_step("step2"))
@@ -530,11 +531,19 @@ class AtisRelayWindow(Gtk.Window):
 
         self.error_label.set_text(data.get("error") or "")
         self.fix_label.set_text(data.get("fix") or "")
+        worker_active = is_worker_active()
 
-        if is_worker_active() and state == "stopped":
+        if worker_active and state == "stopped":
+            state = "listening"
             self.status_label.set_text("Listening")
 
+        self._apply_start_stop_buttons(state, worker_active)
         return True
+
+    def _apply_start_stop_buttons(self, state, worker_active=False):
+        start_on, stop_on = start_stop_enabled(state, worker_active)
+        self.start_btn.set_sensitive(start_on)
+        self.stop_btn.set_sensitive(stop_on)
 
 
 def main():

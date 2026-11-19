@@ -91,9 +91,11 @@ def main():
     win.upload_label.set_text("Last upload: none yet")
     win.error_label.set_text("")
     win.fix_label.set_text("")
+    win._apply_start_stop_buttons("stopped", False)
     capture(win, os.path.join(docs, "step3-start.png"))
     write_status(state="listening", last_upload="2026-11-18T15:05:00Z")
     win.show_step("step3")
+    win._apply_start_stop_buttons("listening", True)
     capture(win, os.path.join(docs, "step3-listening.png"))
     write_status(
         state="error",
@@ -102,9 +104,11 @@ def main():
         fix="Open ATIS Relay and paste the station key ATIS Relay sent you.",
     )
     win.show_step("step3")
+    win._apply_start_stop_buttons("error", False)
     capture(win, os.path.join(docs, "step3-attention.png"))
     write_status(state="stopped", last_upload="2026-11-18T15:05:00Z")
     win.show_step("step3")
+    win._apply_start_stop_buttons("stopped", False)
     capture(win, os.path.join(docs, "step3-stopped.png"))
     names = (
         "logo.png",
