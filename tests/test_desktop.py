@@ -239,6 +239,11 @@ class WordingTest(unittest.TestCase):
         self.assertNotIn("~/.config/atis-relay", readme)
         self.assertNotIn("\u2014", readme)
         self.assertIn("docs/images/logo.png", readme)
+        self.assertIn("docs/images/install-releases.png", readme)
+        self.assertIn("docs/images/install-deb.png", readme)
+        self.assertIn("docs/images/install-menu.png", readme)
+        for name in ("install-releases.png", "install-deb.png", "install-menu.png"):
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, "docs", "images", name)), name)
         self.assertIn("126.9", gui)
         self.assertIn("125.45", gui)
         self.assertIn("126.9", readme)

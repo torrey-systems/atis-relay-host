@@ -35,6 +35,7 @@ def pump():
 
 
 def capture(window, path):
+    window.set_focus(None)
     pump()
     gdk_win = window.get_window()
     width = gdk_win.get_width()

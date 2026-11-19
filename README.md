@@ -12,11 +12,17 @@ The installer starts a background recorder. It runs at boot even if nobody signs
 
 On a computer, open the [Releases](https://github.com/torrey-systems/atis-relay-host/releases) page and download `atis-relay-host_0.2.0_all.deb`. Copy that file onto the Pi (USB stick or the Downloads folder).
 
-A screenshot of the GitHub Releases page is not included here. GitHub pages can show account names, and this guide stays free of personal names.
+![GitHub Releases page for torrey-systems/atis-relay-host, showing the .deb under Assets](docs/images/install-releases.png)
+
+That screenshot is a real Releases page for this public org repo. The row that names who published the tag is cropped out so this guide has no account names.
 
 ## 2. Double-click to install
 
 On the Pi, open the `.deb` file. Raspberry Pi OS opens the package installer. Click install and enter your password when asked.
+
+The dialog below is the Debian Bookworm GTK package installer (gdebi), captured under Xvfb. Raspberry Pi OS opens a similar installer when you open the `.deb`.
+
+![Debian Bookworm package installer for atis-relay-host](docs/images/install-deb.png)
 
 If you prefer one line in a terminal:
 
@@ -31,6 +37,10 @@ Updates: download the newer `.deb` from Releases and install it the same way. An
 ## 3. Open ATIS Relay
 
 Open the Raspberry Pi menu, then Internet (or Other), then **ATIS Relay**. The menu row uses the plane-and-trail logo.
+
+The menu below is Debian Bookworm LXDE under Xvfb, with the same desktop file and icon the `.deb` installs. Raspberry Pi OS uses a similar applications menu.
+
+![Debian Bookworm desktop menu showing ATIS Relay under Internet](docs/images/install-menu.png)
 
 The window looks like this when you add airports:
 
