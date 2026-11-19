@@ -4,6 +4,8 @@ import os
 
 import requests
 
+from pi_atc_config import normalize_airport_code
+
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 RETRY_DELAYS = (1, 2, 4, 8, 16)
 DEFAULT_TIMEOUT = 30
@@ -17,7 +19,7 @@ class AuthRejected(Exception):
 
 class Forbidden(Exception):
     def __init__(self, status_code=403):
-        super().__init__("station token is for a different ICAO (HTTP %s)" % status_code)
+        super().__init__("station token is for a different airport (HTTP %s)" % status_code)
         self.status_code = status_code
 
 
@@ -37,7 +39,7 @@ class ClientError(Exception):
 
 
 CLIENT_ERROR_MESSAGES = {
-    404: "unknown ICAO (HTTP 404)",
+    404: "unknown airport code (HTTP 404)",
     413: "audio too large (HTTP 413)",
     422: "invalid audio upload (HTTP 422)",
 }
@@ -51,7 +53,7 @@ def bearer_headers(token):
 
 
 def api_url(base_url, icao, *parts):
-    bits = [base_url.rstrip("/"), "api", "pi", icao.upper()]
+    bits = [base_url.rstrip("/"), "api", "pi", normalize_airport_code(icao)]
     bits.extend(str(part) for part in parts)
     return "/".join(bits)
 

@@ -11,6 +11,7 @@ from pi_atc_config import (
     apply_runtime_paths,
     atis_relay_url,
     load_config,
+    normalize_airport_code,
     parse_stations,
     station_token_for,
     upload_mode,
@@ -267,7 +268,7 @@ def wait_for_config():
 
 
 def upload_file_s3(mp3_path: str, icao: str) -> str | None:
-    key = prefix + icao + "/" + os.path.basename(mp3_path)
+    key = prefix + normalize_airport_code(icao) + "/" + os.path.basename(mp3_path)
 
     try:
         s3_client().upload_file(mp3_path, bucket, key)
@@ -440,7 +441,7 @@ def main():
         print(f"[station] {icao} @ {freq} MHz")
         write_status(state="listening")
 
-        with tempfile.NamedTemporaryFile(prefix=f"{icao}_", suffix=".wav", dir=TMP_DIR, delete=False) as tf:
+        with tempfile.NamedTemporaryFile(prefix=f"{normalize_airport_code(icao)}_", suffix=".wav", dir=TMP_DIR, delete=False) as tf:
             wav_path = tf.name
 
         ok = record_wav(wav_path, freq)

@@ -252,6 +252,18 @@ class WordingTest(unittest.TestCase):
         self.assertNotIn("126.8", readme)
         self.assertNotIn("135.1", gui)
         self.assertNotIn("135.1", readme)
+        self.assertIn("KMYF or 1G0", gui)
+        self.assertIn("`KMYF` or `1G0`", readme)
+        self.assertNotIn("3 or 4 letter", gui)
+        self.assertNotIn("{ICAO}", readme)
+
+        with open(os.path.join(ROOT, "pi_setup", "setup_portal.py")) as portal_file:
+            portal = portal_file.read()
+
+        self.assertIn('pattern="[A-Za-z0-9]{3,4}"', portal)
+        self.assertIn("3- or 4-character airport code", portal)
+        self.assertNotIn("4-character ICAO", portal)
+        self.assertIn('placeholder="1G0"', portal)
 
 
 class IconPackagingTest(unittest.TestCase):

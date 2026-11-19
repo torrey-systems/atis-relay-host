@@ -9,6 +9,7 @@ from pi_atc_config import (
     env_path,
     load_config,
     mask_secret,
+    normalize_airport_code,
     set_station_token,
     station_token,
     station_token_for,
@@ -37,12 +38,12 @@ def parse_set_key_args(argv):
             if i + 1 >= len(args):
                 return None, None, "missing icao after --icao"
 
-            icao = args[i + 1].strip().upper()
+            icao = normalize_airport_code(args[i + 1])
             i += 2
             continue
 
         if arg.startswith("--icao="):
-            icao = arg.split("=", 1)[1].strip().upper()
+            icao = normalize_airport_code(arg.split("=", 1)[1])
             i += 1
             continue
 
@@ -168,7 +169,7 @@ def cmd_status(stdout=None, environ=None):
 
 def usage(stdout):
     print("usage: atis-relay", file=stdout)
-    print("       atis-relay set-key [--icao ICAO] [token]", file=stdout)
+    print("       atis-relay set-key [--icao CODE] [token]", file=stdout)
     print("       atis-relay status", file=stdout)
 
 

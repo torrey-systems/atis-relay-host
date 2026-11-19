@@ -269,6 +269,65 @@ class HttpClientTest(unittest.TestCase):
         self.assertEqual(session.calls[2]["url"], "https://atisrelay.com/api/pi/KMYF/commands/15/ack")
         self.assertEqual(session.calls[2]["json"], {"ok": True, "result": "rebooting"})
 
+    def test_faa_lid_urls_are_not_k_prefixed(self):
+        session = FakeSession([
+            FakeResponse(201, {
+                "key": "raw_atc_stream/1G0/clip.mp3",
+                "icao": "1G0",
+                "received_at": "2026-11-18T20:00:05Z",
+            }),
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": [{"id": 15, "command": "reboot"}]}),
+            FakeResponse(200, {"ok": True, "status": "acked"}),
+        ])
+        key, body = http.upload_audio(
+            "https://atisrelay.com",
+            "station-token-value",
+            "1g0",
+            self.mp3,
+            "2026-11-18T20:00:00Z",
+            session=session,
+            sleep_fn=self.sleep,
+        )
+        self.assertEqual(key, "raw_atc_stream/1G0/clip.mp3")
+        self.assertEqual(body["icao"], "1G0")
+        http.post_heartbeat(
+            "https://atisrelay.com",
+            "tok",
+            "1g0",
+            {"temp_c": 48.5},
+            session=session,
+            sleep_fn=self.sleep,
+        )
+        http.fetch_commands(
+            "https://atisrelay.com",
+            "tok",
+            "1g0",
+            session=session,
+            sleep_fn=self.sleep,
+        )
+        http.ack_command(
+            "https://atisrelay.com",
+            "tok",
+            "1g0",
+            15,
+            ok=True,
+            result="rebooting",
+            session=session,
+            sleep_fn=self.sleep,
+        )
+        urls = [call["url"] for call in session.calls]
+        self.assertEqual(urls, [
+            "https://atisrelay.com/api/pi/1G0/audio",
+            "https://atisrelay.com/api/pi/1G0/heartbeat",
+            "https://atisrelay.com/api/pi/1G0/commands",
+            "https://atisrelay.com/api/pi/1G0/commands/15/ack",
+        ])
+
+        for url in urls:
+            self.assertNotIn("K1G0", url)
+            self.assertNotIn("/api/pi/KMYF/", url)
+
 
 class HeartbeatHttpTest(unittest.TestCase):
     def setUp(self):
@@ -368,6 +427,35 @@ class HeartbeatHttpTest(unittest.TestCase):
         self.assertEqual(session.calls[2]["url"], "https://atisrelay.com/api/pi/KSEE/heartbeat")
         self.assertEqual(session.calls[2]["headers"]["Authorization"], "Bearer tok-see")
         self.assertEqual(session.calls[3]["url"], "https://atisrelay.com/api/pi/KSEE/commands")
+
+    def test_http_uses_token_for_faa_lid_and_icao(self):
+        import heartbeat
+
+        os.environ.pop("STATION_TOKEN", None)
+        os.environ["STATION_TOKENS"] = "KMYF:tok-myf,1G0:tok-1g0"
+        os.environ["STATIONS"] = "KMYF:126.9,1g0:119.475"
+        session = FakeSession([
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": []}),
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": []}),
+        ])
+        heartbeat.run_http_checkin(
+            reboot_fn=lambda: self.reboots.append("nope"),
+            session=session,
+            sleep_fn=lambda _s: None,
+            pi_id="test-pi",
+        )
+        self.assertEqual(self.reboots, [])
+        self.assertEqual(session.calls[0]["url"], "https://atisrelay.com/api/pi/KMYF/heartbeat")
+        self.assertEqual(session.calls[0]["headers"]["Authorization"], "Bearer tok-myf")
+        self.assertEqual(session.calls[1]["url"], "https://atisrelay.com/api/pi/KMYF/commands")
+        self.assertEqual(session.calls[2]["url"], "https://atisrelay.com/api/pi/1G0/heartbeat")
+        self.assertEqual(session.calls[2]["headers"]["Authorization"], "Bearer tok-1g0")
+        self.assertEqual(session.calls[3]["url"], "https://atisrelay.com/api/pi/1G0/commands")
+
+        for call in session.calls:
+            self.assertNotIn("K1G0", call["url"])
 
     def test_shared_token_is_not_used_for_two_icaos(self):
         import heartbeat
