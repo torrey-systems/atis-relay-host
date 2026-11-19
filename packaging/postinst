@@ -19,10 +19,80 @@ remove_network_overrides() {
   rm -f /etc/systemd/journald.conf.d/pi-atc.conf
 }
 
+remove_legacy_user_autostart() {
+  find /home -maxdepth 4 -path '/home/*/.config/autostart/atis-relay.desktop' -delete >/dev/null 2>&1 || true
+  find /home -maxdepth 6 -path '/home/*/.config/systemd/user/atis-relay.service' -delete >/dev/null 2>&1 || true
+  find /home -maxdepth 7 -path '/home/*/.config/systemd/user/default.target.wants/atis-relay.service' -delete >/dev/null 2>&1 || true
+}
+
+ensure_service_user() {
+  if command -v systemd-sysusers >/dev/null 2>&1; then
+    systemd-sysusers atis-relay.conf >/dev/null 2>&1 || systemd-sysusers >/dev/null 2>&1 || true
+  fi
+
+  if ! getent passwd atis-relay >/dev/null; then
+    adduser --system --quiet --group --home /var/lib/atis-relay \
+      --no-create-home --gecos "ATIS Relay recorder" atis-relay
+  fi
+
+  if getent group audio >/dev/null; then
+    adduser atis-relay audio >/dev/null 2>&1 || true
+  fi
+
+  if getent group plugdev >/dev/null; then
+    adduser atis-relay plugdev >/dev/null 2>&1 || true
+  fi
+}
+
+ensure_paths() {
+  if command -v systemd-tmpfiles >/dev/null 2>&1; then
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/atis-relay.conf >/dev/null 2>&1 || true
+  fi
+
+  mkdir -p /etc/atis-relay /var/lib/atis-relay
+  chown atis-relay:atis-relay /etc/atis-relay /var/lib/atis-relay
+  chmod 750 /etc/atis-relay
+  chmod 755 /var/lib/atis-relay
+}
+
+migrate_config() {
+  python3 - <<'PY'
+import sys
+sys.path.insert(0, "/opt/pi-atc")
+from pi_atc_config import migrate_to_system_env
+n = migrate_to_system_env()
+print("[migrate] copied %d unset keys from a previous config" % n)
+PY
+  if [ -f /etc/atis-relay/env ]; then
+    chown atis-relay:atis-relay /etc/atis-relay/env
+    chmod 600 /etc/atis-relay/env
+  fi
+
+  if [ -f /var/lib/atis-relay/public.json ]; then
+    chown atis-relay:atis-relay /var/lib/atis-relay/public.json
+    chmod 644 /var/lib/atis-relay/public.json
+  fi
+}
+
+enable_recorder() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable atis-relay.service >/dev/null 2>&1 || true
+  systemctl start atis-relay.service >/dev/null 2>&1 || true
+}
+
 case "$1" in
   configure)
     disable_legacy_system_units
     remove_network_overrides
+    remove_legacy_user_autostart
+    ensure_service_user
+    ensure_paths
+    migrate_config
+    enable_recorder
 
     if command -v update-desktop-database >/dev/null 2>&1; then
       update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true

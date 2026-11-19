@@ -7,12 +7,14 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import atis_relay_ctl as ctl
 import atis_relay_service as service
 import atis_relay_status as status
 import pi_atc_config as config
 
 
 TOKEN = "desktop-secret-station-token"
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 class DesktopConfigTest(unittest.TestCase):
@@ -20,11 +22,15 @@ class DesktopConfigTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.config_home = os.path.join(self.tmpdir.name, "config")
         self.data_home = os.path.join(self.tmpdir.name, "data")
+        self.env_file = os.path.join(self.tmpdir.name, "etc", "atis-relay", "env")
+        self.state_dir = os.path.join(self.tmpdir.name, "var", "atis-relay")
+        os.makedirs(os.path.dirname(self.env_file), exist_ok=True)
+        os.makedirs(self.state_dir, exist_ok=True)
         self.env_patch = patch.dict(os.environ, {
             "XDG_CONFIG_HOME": self.config_home,
             "XDG_DATA_HOME": self.data_home,
-            "PI_ATC_ENV_FILE": os.path.join(self.config_home, "atis-relay", "env"),
-            "PI_ATC_STATE_DIR": os.path.join(self.data_home, "atis-relay"),
+            "PI_ATC_ENV_FILE": self.env_file,
+            "PI_ATC_STATE_DIR": self.state_dir,
         })
         self.env_patch.start()
 
@@ -32,33 +38,51 @@ class DesktopConfigTest(unittest.TestCase):
         self.env_patch.stop()
         self.tmpdir.cleanup()
 
-    def test_save_user_settings_mode_600_and_no_token_in_status_helpers(self):
-        path = config.user_env_path()
+    def test_save_settings_mode_600_and_public_config_omits_token(self):
         config.save_desktop_settings(
-            path,
+            self.env_file,
             [("KMYF", "126.8")],
             {"KMYF": TOKEN},
             audio_device="plughw:1,0",
             capture_kind="alsa",
         )
-        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
-        data = open(path).read()
+        self.assertEqual(stat.S_IMODE(os.stat(self.env_file).st_mode), 0o600)
+        with open(self.env_file) as env_file:
+            data = env_file.read()
         self.assertIn("STATION_TOKEN=%s\n" % TOKEN, data)
         self.assertIn("CAPTURE_KIND=alsa", data)
-        masked = config.mask_secret(TOKEN)
-        self.assertNotIn(TOKEN, masked)
-        self.assertEqual(config.env_path(), path)
+        public = config.read_public_config()
+        self.assertEqual(public["stations"], [["KMYF", "126.8"]])
+        self.assertEqual(public["tokens"]["KMYF"], True)
+        with open(config.public_config_path()) as public_file:
+            self.assertNotIn(TOKEN, public_file.read())
+        self.assertEqual(stat.S_IMODE(os.stat(config.public_config_path()).st_mode), 0o644)
+        self.assertEqual(config.env_path(), self.env_file)
 
     def test_save_keeps_existing_key_when_blank(self):
-        path = config.user_env_path()
-        config.save_desktop_settings(path, [("KMYF", "126.8")], {"KMYF": TOKEN})
-        config.save_desktop_settings(path, [("KMYF", "126.8")], {"KMYF": ""})
-        data = config.read_env_file(path)
+        config.save_desktop_settings(self.env_file, [("KMYF", "126.8")], {"KMYF": TOKEN})
+        config.save_desktop_settings(self.env_file, [("KMYF", "126.8")], {"KMYF": ""})
+        data = config.read_env_file(self.env_file)
         self.assertEqual(data["STATION_TOKEN"], TOKEN)
 
-    def test_user_paths_use_xdg(self):
-        self.assertEqual(config.user_config_dir(), os.path.join(self.config_home, "atis-relay"))
-        self.assertEqual(config.user_state_dir(), os.path.join(self.data_home, "atis-relay"))
+    def test_default_env_path_is_system(self):
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("PI_ATC_ENV_FILE", None)
+            self.assertEqual(config.env_path(), config.SYSTEM_ENV_PATH)
+
+    def test_migrate_to_system_env_from_extra_sources_without_printing_paths(self):
+        src = os.path.join(self.tmpdir.name, "old.env")
+        dest = os.path.join(self.tmpdir.name, "new.env")
+        with open(src, "w") as f:
+            f.write("STATIONS=KMYF:126.8\nSTATION_TOKEN=%s\nCAPTURE_KIND=sdr\n" % TOKEN)
+
+        copied = config.migrate_to_system_env(dest_path=dest, extra_sources=[src])
+        self.assertGreater(copied, 0)
+        data = config.read_env_file(dest)
+        self.assertEqual(data["STATION_TOKEN"], TOKEN)
+        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o600)
+        with open(config.public_config_path()) as public_file:
+            self.assertNotIn(TOKEN, public_file.read())
 
 
 class StatusFormatTest(unittest.TestCase):
@@ -88,53 +112,131 @@ class StatusFormatTest(unittest.TestCase):
         dt2 = datetime(2026, 11, 18, 9, 7, tzinfo=timezone.utc)
         self.assertEqual(status.format_local_time(dt2), "9:07 AM")
 
-    def test_write_status_keeps_last_upload(self):
+    def test_write_status_keeps_last_upload_and_is_readable(self):
         status.write_status(state="uploading", last_upload="2026-11-18T15:05:00Z")
         status.write_status(state="listening")
         data = status.read_status()
         self.assertEqual(data["state"], "listening")
         self.assertEqual(data["last_upload"], "2026-11-18T15:05:00Z")
+        self.assertEqual(stat.S_IMODE(os.stat(status.status_path()).st_mode), 0o644)
+
+    def test_missing_key_points_at_issued_station_key(self):
+        message, fix = status.suggestion_for_error("missing_key")
+        self.assertIn("station key", fix)
+        self.assertIn("ATIS Relay sent you", fix)
+        self.assertNotIn("atisrelay.com", fix)
+        self.assertNotIn("atisrelay.com", message)
 
 
-class AutostartTest(unittest.TestCase):
+class ServiceCtlTest(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
-        self.config_home = os.path.join(self.tmpdir.name, "config")
-        self.env_patch = patch.dict(os.environ, {"XDG_CONFIG_HOME": self.config_home})
-        self.env_patch.start()
         self.calls = []
 
-    def tearDown(self):
-        self.env_patch.stop()
-        self.tmpdir.cleanup()
-
-    def fake_systemctl(self, args):
+    def fake_ctl(self, args, timeout=30):
         self.calls.append(list(args))
 
         class Result:
             returncode = 0
-            stdout = "active\n"
+            stdout = "active\n" if args and args[0] == "is-active" else "enabled\n"
+            stderr = ""
 
         return Result()
 
-    def test_enable_writes_desktop_file(self):
-        with patch.object(service, "_systemctl_user", side_effect=self.fake_systemctl):
-            ok = service.enable_autostart()
+    def test_start_stop_enable_use_ctl(self):
+        with patch.object(service, "run_ctl", side_effect=self.fake_ctl):
+            self.assertTrue(service.start_worker())
+            self.assertTrue(service.stop_worker())
+            self.assertTrue(service.enable_service())
+            self.assertTrue(service.disable_service())
+            self.assertTrue(service.is_worker_active())
+            self.assertTrue(service.is_enabled())
+
+        self.assertEqual([call[0] for call in self.calls], [
+            "start",
+            "stop",
+            "enable",
+            "disable",
+            "is-active",
+            "is-enabled",
+        ])
+
+    def test_install_settings_writes_override_without_pkexec(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        env_file = os.path.join(tmpdir.name, "env")
+        state_dir = os.path.join(tmpdir.name, "state")
+        os.makedirs(state_dir, exist_ok=True)
+
+        with patch.dict(os.environ, {
+            "PI_ATC_ENV_FILE": env_file,
+            "PI_ATC_STATE_DIR": state_dir,
+        }):
+            ok = service.install_settings(
+                [("KMYF", "126.8")],
+                {"KMYF": TOKEN},
+                capture_kind="sdr",
+            )
 
         self.assertTrue(ok)
-        path = service.autostart_path()
-        self.assertTrue(os.path.isfile(path))
-        text = open(path).read()
-        self.assertIn("Exec=atis-relay --worker", text)
-        self.assertTrue(any(call[:2] == ["enable", "--now"] for call in self.calls))
+        with open(env_file) as saved:
+            self.assertIn("STATION_TOKEN=%s\n" % TOKEN, saved.read())
+        tmpdir.cleanup()
 
-    def test_disable_removes_desktop_file(self):
-        with patch.object(service, "_systemctl_user", side_effect=self.fake_systemctl):
-            service.enable_autostart()
-            service.disable_autostart()
 
-        self.assertFalse(os.path.isfile(service.autostart_path()))
-        self.assertTrue(any(call[:2] == ["disable", "--now"] for call in self.calls))
+class HelperCtlTest(unittest.TestCase):
+    def test_rejects_unknown_action(self):
+        self.assertEqual(ctl.main(["reboot"]), 2)
+        self.assertEqual(ctl.main(["status"]), 2)
+
+    def test_install_config_merges_and_omits_secrets_from_public(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        src = os.path.join(tmpdir.name, "incoming.env")
+        dest = os.path.join(tmpdir.name, "env")
+        state_dir = os.path.join(tmpdir.name, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        with open(src, "w") as f:
+            f.write("STATIONS=KMYF:126.8\nSTATION_TOKENS=KMYF:%s\nCAPTURE_KIND=sdr\n" % TOKEN)
+        os.chmod(src, 0o600)
+
+        with patch.dict(os.environ, {
+            "PI_ATC_ENV_FILE": dest,
+            "PI_ATC_STATE_DIR": state_dir,
+        }):
+            with patch("os.geteuid", return_value=0):
+                code = ctl.main(["install-config", src])
+
+        self.assertEqual(code, 0)
+        data = config.read_env_file(dest)
+        self.assertEqual(data["STATION_TOKEN"], TOKEN)
+        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o600)
+        with open(os.path.join(state_dir, "public.json")) as public_file:
+            self.assertNotIn(TOKEN, public_file.read())
+        tmpdir.cleanup()
+
+    def test_install_config_rejects_world_writable_source(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        src = os.path.join(tmpdir.name, "incoming.env")
+        with open(src, "w") as f:
+            f.write("STATIONS=KMYF:126.8\nSTATION_TOKEN=%s\n" % TOKEN)
+        os.chmod(src, 0o666)
+
+        with patch("os.geteuid", return_value=0):
+            code = ctl.main(["install-config", src])
+
+        self.assertEqual(code, 1)
+        tmpdir.cleanup()
+
+
+class WordingTest(unittest.TestCase):
+    def test_gui_and_readme_use_issued_station_key(self):
+        with open(os.path.join(ROOT, "atis_relay_gui.py")) as gui_file:
+            gui = gui_file.read()
+        with open(os.path.join(ROOT, "README.md")) as readme_file:
+            readme = readme_file.read()
+        self.assertIn("Paste the station key ATIS Relay sent you", gui)
+        self.assertIn("Paste the station key ATIS Relay sent you", readme)
+        self.assertNotIn("Paste the station key from atisrelay.com", gui)
+        self.assertNotIn("Paste the station key from atisrelay.com", readme)
+        self.assertNotIn("~/.config/atis-relay", readme)
 
 
 if __name__ == "__main__":

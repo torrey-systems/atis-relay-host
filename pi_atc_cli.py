@@ -4,7 +4,7 @@ import os
 import sys
 
 from pi_atc_config import (
-    apply_user_paths,
+    apply_runtime_paths,
     atis_relay_url,
     env_path,
     load_config,
@@ -173,7 +173,7 @@ def usage(stdout):
 
 
 def main(argv=None, stdin=None, stdout=None, restart_fn=None, env_file=None):
-    apply_user_paths()
+    apply_runtime_paths()
 
     if argv is None:
         argv = sys.argv[1:]

@@ -8,7 +8,7 @@ maintainer: Torrey Systems <deploy@atisrelay.com>
 homepage: https://atisrelay.com
 description: |-
   ATIS Relay desktop app for Raspberry Pi
-  Simple window to pick an airport, paste a station key, test the USB radio, and start sending ATIS clips.
+  Simple window to pick an airport, paste a station key, test the USB radio, and start sending ATIS clips. The recorder runs as a system service at boot.
 depends:
   - python3 (>= 3.10)
   - python3-gi
@@ -19,6 +19,9 @@ depends:
   - rtl-sdr
   - ffmpeg
   - alsa-utils
+  - adduser
+  - pkexec
+  - polkitd
 suggests:
   - python3-boto3
   - python3-flask
@@ -47,6 +50,8 @@ contents:
     dst: /opt/pi-atc/atis_relay_worker.py
   - src: atis_relay_gui.py
     dst: /opt/pi-atc/atis_relay_gui.py
+  - src: atis_relay_ctl.py
+    dst: /opt/pi-atc/atis_relay_ctl.py
   - src: packaging/atis-relay
     dst: /usr/bin/atis-relay
     file_info:
@@ -55,12 +60,24 @@ contents:
     dst: /usr/bin/pi-atc
     file_info:
       mode: 0755
+  - src: packaging/atis-relay-ctl
+    dst: /usr/lib/atis-relay/atis-relay-ctl
+    file_info:
+      mode: 0755
   - src: packaging/atis-relay.desktop
     dst: /usr/share/applications/atis-relay.desktop
   - src: packaging/atis-relay.svg
     dst: /usr/share/icons/hicolor/scalable/apps/atis-relay.svg
   - src: packaging/atis-relay.service
-    dst: /usr/lib/systemd/user/atis-relay.service
+    dst: /lib/systemd/system/atis-relay.service
+  - src: packaging/com.atisrelay.host.policy
+    dst: /usr/share/polkit-1/actions/com.atisrelay.host.policy
+  - src: packaging/10-com.atisrelay.host.rules
+    dst: /usr/share/polkit-1/rules.d/10-com.atisrelay.host.rules
+  - src: packaging/atis-relay.sysusers
+    dst: /usr/lib/sysusers.d/atis-relay.conf
+  - src: packaging/atis-relay.tmpfiles
+    dst: /usr/lib/tmpfiles.d/atis-relay.conf
   - src: README.md
     dst: /usr/share/doc/atis-relay-host/README.md
   - src: docs

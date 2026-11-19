@@ -20,9 +20,9 @@ def state_dir():
     if isinstance(override, str) and override.strip():
         return override.strip()
 
-    from pi_atc_config import user_state_dir
+    from pi_atc_config import SYSTEM_STATE_DIR
 
-    return user_state_dir()
+    return SYSTEM_STATE_DIR
 
 
 def utc_now_iso(now=None):

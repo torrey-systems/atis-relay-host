@@ -1,0 +1,2 @@
+d /etc/atis-relay 0750 atis-relay atis-relay -
+d /var/lib/atis-relay 0755 atis-relay atis-relay -

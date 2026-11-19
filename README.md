@@ -22,6 +22,8 @@ Run that from the folder that contains the file.
 
 Updates: download the newer `.deb` from Releases and install it the same way. An apt repository is not shipped yet, so the Software updater will not pick this up on its own.
 
+The installer starts a background recorder service. It runs at boot even if nobody signs in to the desktop, and it restarts if it crashes.
+
 ## 3. Open ATIS Relay
 
 Open the Raspberry Pi menu, then Internet (or Other), then **ATIS Relay**.
@@ -32,11 +34,11 @@ Open the Raspberry Pi menu, then Internet (or Other), then **ATIS Relay**.
 
 1. Type the airport code (for example `KMYF`).
 2. Type the ATIS frequency in MHz (for example `126.8`).
-3. Paste the station key from atisrelay.com. The field hides the key.
+3. Paste the station key ATIS Relay sent you. The field hides the key.
 4. A second airport is optional. Each airport needs its own key.
 5. Click **Next**.
 
-The key is stored only on this Pi, in `~/.config/atis-relay`, with permission 600. The app never prints the key.
+The key is stored only on this Pi, in `/etc/atis-relay`, readable only by the recorder service (permission 600). The app never prints the key.
 
 ## 5. Choose the radio and test it
 
@@ -51,13 +53,13 @@ The key is stored only on this Pi, in `~/.config/atis-relay`, with permission 60
 
 ![Step 3, start and status](docs/images/step3-start.png)
 
-1. Leave **Start automatically when the Pi turns on** checked if you want it to run after you sign in.
-2. Click **Start**.
+1. Leave **Start automatically when the Pi turns on** checked if you want it to run at boot, even before anyone signs in.
+2. Click **Start**. The window talks to the recorder service. You should not see a password prompt.
 3. Status should read **Listening**, then **Uploading** when a new clip is sent.
 4. Last upload uses local time, such as `3:05 PM`.
 5. If something is wrong, the window shows a short explanation and what to try.
 
-You do not need sudo after the package is installed. The app does not change WiFi, hostname, or NetworkManager.
+You do not need the terminal or sudo after the package is installed. The app does not change WiFi, hostname, or NetworkManager.
 
 ## Status meanings
 

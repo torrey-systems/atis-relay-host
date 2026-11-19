@@ -10,26 +10,28 @@ from gi.repository import GLib, Gtk
 
 from atis_relay_devices import list_capture_devices, test_capture
 from atis_relay_service import (
-    disable_autostart,
-    enable_autostart,
-    is_autostart_enabled,
+    disable_service,
+    enable_service,
+    install_settings,
     is_worker_active,
+    service_enabled_state,
     start_worker,
     stop_worker,
 )
-from atis_relay_status import format_local_time, read_status, status_label, write_status
+from atis_relay_status import format_local_time, read_status, status_label
 from pi_atc_config import (
-    apply_user_paths,
+    apply_runtime_paths,
     env_path,
-    load_config,
     parse_stations,
     read_env_file,
-    save_desktop_settings,
+    read_public_config,
     station_token_for,
-    user_config_dir,
 )
 
 ICAO_RE = re.compile(r"^[A-Z0-9]{3,4}$")
+KEY_HINT = "Enter the airport code and ATIS frequency. Paste the station key ATIS Relay sent you. Leave airport 2 blank if you only have one."
+KEY_MISSING_1 = "Paste the station key ATIS Relay sent you."
+KEY_MISSING_2 = "Paste the station key ATIS Relay sent you for airport 2."
 
 
 def _valid_freq(text):
@@ -76,7 +78,7 @@ class AtisRelayWindow(Gtk.Window):
         heading.set_xalign(0)
         heading.get_style_context().add_class("heading")
         box.pack_start(heading, False, False, 0)
-        hint = Gtk.Label(label="Enter the airport code and ATIS frequency. Paste the station key from atisrelay.com. Leave airport 2 blank if you only have one.")
+        hint = Gtk.Label(label=KEY_HINT)
         hint.set_line_wrap(True)
         hint.set_xalign(0)
         box.pack_start(hint, False, False, 0)
@@ -207,11 +209,46 @@ class AtisRelayWindow(Gtk.Window):
 
         self.stack.set_visible_child_name(name)
 
-    def _load_saved(self):
-        apply_user_paths()
-        load_config()
+    def _saved_config(self):
+        public = read_public_config()
+        stations = public.get("stations") or []
+        parsed = []
+
+        for item in stations:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                parsed.append((str(item[0]).strip().upper(), str(item[1]).strip()))
+
+        if parsed:
+            return {
+                "stations": parsed,
+                "tokens": public.get("tokens") or {},
+                "audio_device": public.get("audio_device") or "",
+                "capture_kind": public.get("capture_kind") or "sdr",
+            }
+
         data = read_env_file(env_path())
-        stations = parse_stations(data.get("STATIONS", ""))
+        return {
+            "stations": parse_stations(data.get("STATIONS", "")),
+            "tokens": {
+                icao: bool(station_token_for(icao, data))
+                for icao, _freq in parse_stations(data.get("STATIONS", ""))
+            },
+            "audio_device": (data.get("AUDIO_DEVICE") or "").strip(),
+            "capture_kind": (data.get("CAPTURE_KIND") or "sdr").strip() or "sdr",
+        }
+
+    def _token_saved(self, icao):
+        if not icao:
+            return False
+
+        saved = self._saved_config()
+        flags = saved.get("tokens") or {}
+        return bool(flags.get(icao) or flags.get(icao.upper()))
+
+    def _load_saved(self):
+        apply_runtime_paths()
+        saved = self._saved_config()
+        stations = saved.get("stations") or []
 
         if stations:
             self.icao1.set_text(stations[0][0])
@@ -221,17 +258,16 @@ class AtisRelayWindow(Gtk.Window):
             self.icao2.set_text(stations[1][0])
             self.freq2.set_text(stations[1][1])
 
-        if station_token_for(self.icao1.get_text().strip().upper(), data):
+        if self._token_saved(self.icao1.get_text().strip().upper()):
             self.key1.set_placeholder_text("Key saved. Leave blank to keep it.")
 
-        if station_token_for(self.icao2.get_text().strip().upper(), data):
+        if self._token_saved(self.icao2.get_text().strip().upper()):
             self.key2.set_placeholder_text("Key saved. Leave blank to keep it.")
 
-        self.autostart.set_active(is_autostart_enabled() or True)
-        saved_device = (data.get("AUDIO_DEVICE") or "").strip()
-        saved_kind = (data.get("CAPTURE_KIND") or "sdr").strip()
-        self._saved_device = saved_device
-        self._saved_kind = saved_kind
+        enabled = service_enabled_state()
+        self.autostart.set_active(True if enabled is None else enabled)
+        self._saved_device = saved.get("audio_device") or ""
+        self._saved_kind = saved.get("capture_kind") or "sdr"
 
     def _stations_from_form(self):
         icao1 = self.icao1.get_text().strip().upper()
@@ -272,6 +308,14 @@ class AtisRelayWindow(Gtk.Window):
 
         return tokens
 
+    def _save_form(self, stations, tokens, audio_device="", capture_kind="sdr"):
+        return install_settings(
+            stations,
+            tokens,
+            audio_device=audio_device,
+            capture_kind=capture_kind,
+        )
+
     def _on_step1_next(self, _button):
         stations, error = self._stations_from_form()
         self.step1_error.set_text(error)
@@ -280,18 +324,19 @@ class AtisRelayWindow(Gtk.Window):
             return
 
         tokens = self._tokens_from_form(stations)
-        existing = read_env_file(env_path())
 
-        if not tokens.get(stations[0][0]) and not station_token_for(stations[0][0], existing):
-            self.step1_error.set_text("Paste the station key for airport 1 from atisrelay.com.")
+        if not tokens.get(stations[0][0]) and not self._token_saved(stations[0][0]):
+            self.step1_error.set_text(KEY_MISSING_1)
             return
 
-        if len(stations) > 1 and not tokens.get(stations[1][0]) and not station_token_for(stations[1][0], existing):
-            self.step1_error.set_text("Paste the station key for airport 2 from atisrelay.com.")
+        if len(stations) > 1 and not tokens.get(stations[1][0]) and not self._token_saved(stations[1][0]):
+            self.step1_error.set_text(KEY_MISSING_2)
             return
 
-        os.makedirs(user_config_dir(), exist_ok=True)
-        save_desktop_settings(env_path(), stations, tokens)
+        if not self._save_form(stations, tokens):
+            self.step1_error.set_text("Could not save settings. Try again from this window.")
+            return
+
         self.show_step("step2")
 
     def _reload_devices(self):
@@ -327,18 +372,22 @@ class AtisRelayWindow(Gtk.Window):
         if error:
             self.show_step("step1")
             self.step1_error.set_text(error)
-            return
+            return False
 
         tokens = self._tokens_from_form(stations)
         audio_device = "" if item["kind"] == "sdr" else item["id"]
-        save_desktop_settings(
-            env_path(),
+
+        if not self._save_form(
             stations,
             tokens,
             audio_device=audio_device,
             capture_kind=item["kind"],
-        )
+        ):
+            self.step2_note.set_text("Could not save settings. Try again from this window.")
+            return False
+
         self.show_step("step3")
+        return True
 
     def _on_test(self, _button):
         item = self._selected_device()
@@ -367,21 +416,28 @@ class AtisRelayWindow(Gtk.Window):
         return False
 
     def _on_start(self, _button):
-        self._on_step2_next(_button)
+        if not self._on_step2_next(_button):
+            return
 
         if self.autostart.get_active():
-            enable_autostart()
+            enable_service()
 
         else:
-            disable_autostart()
+            disable_service()
 
-        write_status(state="waiting")
-        start_worker()
+        if not start_worker():
+            self.error_label.set_text("Could not start the recorder.")
+            self.fix_label.set_text("Try Start again from this window.")
+            return
+
         self._poll_status()
 
     def _on_stop(self, _button):
-        stop_worker()
-        write_status(state="stopped")
+        if not stop_worker():
+            self.error_label.set_text("Could not stop the recorder.")
+            self.fix_label.set_text("Try Stop again from this window.")
+            return
+
         self._poll_status()
 
     def _poll_status(self):
@@ -407,8 +463,7 @@ class AtisRelayWindow(Gtk.Window):
 
 
 def main():
-    apply_user_paths()
-    os.makedirs(user_config_dir(), exist_ok=True)
+    apply_runtime_paths()
     AtisRelayWindow()
     Gtk.main()
     return 0

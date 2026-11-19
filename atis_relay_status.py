@@ -2,6 +2,7 @@
 import os
 from datetime import datetime, timezone
 
+from pi_atc_config import _chown_service_user
 from pi_atc_state import read_json, state_dir, write_json_atomic
 
 STATUS_FILE = "status.json"
@@ -63,6 +64,14 @@ def write_status(state="stopped", error="", fix="", last_upload=None, extra=None
         payload.update(extra)
 
     write_json_atomic(status_path(), payload)
+
+    try:
+        os.chmod(status_path(), 0o644)
+        _chown_service_user(status_path())
+
+    except OSError:
+        pass
+
     return payload
 
 
@@ -95,15 +104,15 @@ def suggestion_for_error(kind):
     mapping = {
         "missing_key": (
             "The station key is missing.",
-            "Open ATIS Relay and paste the key from atisrelay.com.",
+            "Open ATIS Relay and paste the station key ATIS Relay sent you.",
         ),
         "bad_key": (
             "The station key was not accepted.",
-            "Copy a new key from atisrelay.com for this airport.",
+            "Paste the station key ATIS Relay sent you for this airport.",
         ),
         "wrong_airport": (
             "This key belongs to a different airport.",
-            "Paste the key issued for this airport on atisrelay.com.",
+            "Paste the station key ATIS Relay sent you for this airport.",
         ),
         "no_radio": (
             "No radio dongle was found.",

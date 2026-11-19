@@ -1,77 +1,70 @@
 #!/usr/bin/env python3
 import os
 import subprocess
+import sys
+import tempfile
 
-from pi_atc_config import user_config_dir
+from pi_atc_config import env_path, save_desktop_settings, write_public_config
 
 UNIT_NAME = "atis-relay.service"
-AUTOSTART_NAME = "atis-relay.desktop"
+CTL_PATH = "/usr/lib/atis-relay/atis-relay-ctl"
+PRIV_ACTIONS = ("start", "stop", "restart", "enable", "disable", "install-config")
 
 
-def autostart_dir():
-    config_home = os.environ.get("XDG_CONFIG_HOME")
+def ctl_command():
+    if os.path.isfile(CTL_PATH) and os.access(CTL_PATH, os.X_OK):
+        return [CTL_PATH]
 
-    if isinstance(config_home, str) and config_home.strip():
-        base = config_home.strip()
-
-    else:
-        base = os.path.join(os.path.expanduser("~"), ".config")
-
-    return os.path.join(base, "autostart")
+    return [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "atis_relay_ctl.py")]
 
 
-def autostart_path():
-    return os.path.join(autostart_dir(), AUTOSTART_NAME)
+def run_ctl(args, timeout=30):
+    cmd = ctl_command() + list(args)
+    action = args[0] if args else ""
 
-
-def autostart_desktop_text():
-    return "\n".join([
-        "[Desktop Entry]",
-        "Type=Application",
-        "Name=ATIS Relay",
-        "Comment=Start ATIS Relay when you sign in",
-        "Exec=atis-relay --worker",
-        "Icon=atis-relay",
-        "Terminal=false",
-        "X-GNOME-Autostart-enabled=true",
-        "",
-    ])
-
-
-def _systemctl_user(args):
-    env = os.environ.copy()
-    runtime = env.get("XDG_RUNTIME_DIR")
-
-    if not runtime:
-        env["XDG_RUNTIME_DIR"] = "/run/user/%s" % os.getuid()
+    if action in PRIV_ACTIONS and os.geteuid() != 0:
+        cmd = ["pkexec"] + cmd
 
     try:
         return subprocess.run(
-            ["systemctl", "--user"] + list(args),
+            cmd,
             capture_output=True,
             text=True,
             check=False,
-            env=env,
+            timeout=timeout,
         )
 
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return None
 
 
-def is_autostart_enabled():
-    if os.path.isfile(autostart_path()):
-        return True
-
-    res = _systemctl_user(["is-enabled", UNIT_NAME])
+def service_enabled_state():
+    res = run_ctl(["is-enabled"])
 
     if res is None:
+        return None
+
+    text = (res.stdout or "").strip()
+
+    if res.returncode == 0 or text == "enabled":
+        return True
+
+    if text in ("disabled", "masked"):
         return False
 
-    return res.returncode == 0
+    return None
+
+
+def is_enabled():
+    return service_enabled_state() is True
+
+
+def is_autostart_enabled():
+    return is_enabled()
 
 
 def is_worker_active():
-    res = _systemctl_user(["is-active", UNIT_NAME])
+    res = run_ctl(["is-active"])
 
     if res is None:
         return False
@@ -79,65 +72,78 @@ def is_worker_active():
     return res.returncode == 0 and (res.stdout or "").strip() == "active"
 
 
-def enable_autostart():
-    os.makedirs(autostart_dir(), exist_ok=True)
-    path = autostart_path()
-    with open(path, "w") as f:
-        f.write(autostart_desktop_text())
+def enable_service():
+    res = run_ctl(["enable"])
+    return res is not None and res.returncode == 0
 
-    os.chmod(path, 0o644)
-    _systemctl_user(["daemon-reload"])
-    res = _systemctl_user(["enable", "--now", UNIT_NAME])
-    return res is None or res.returncode == 0 or os.path.isfile(path)
+
+def disable_service():
+    res = run_ctl(["disable"])
+    return res is not None and res.returncode == 0
+
+
+def enable_autostart():
+    return enable_service()
 
 
 def disable_autostart():
-    try:
-        os.remove(autostart_path())
-
-    except OSError:
-        pass
-
-    _systemctl_user(["disable", "--now", UNIT_NAME])
-    return True
+    return disable_service()
 
 
 def start_worker():
-    res = _systemctl_user(["start", UNIT_NAME])
-
-    if res is not None and res.returncode == 0:
-        return True
-
-    return _spawn_worker()
+    res = run_ctl(["start"])
+    return res is not None and res.returncode == 0
 
 
 def stop_worker():
-    _systemctl_user(["stop", UNIT_NAME])
-    return True
+    res = run_ctl(["stop"])
+    return res is not None and res.returncode == 0
 
 
 def restart_worker():
-    res = _systemctl_user(["restart", UNIT_NAME])
-
-    if res is not None and res.returncode == 0:
-        return True
-
-    return start_worker()
+    res = run_ctl(["restart"])
+    return res is not None and res.returncode == 0
 
 
-def _spawn_worker():
-    try:
-        subprocess.Popen(
-            ["atis-relay", "--worker"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+def install_settings(stations, tokens, audio_device="", capture_kind="sdr"):
+    dest = env_path()
+    directory = os.path.dirname(dest) or "."
+
+    if os.path.isfile(dest):
+        can_write = os.access(dest, os.W_OK)
+
+    else:
+        can_write = os.access(directory, os.W_OK | os.X_OK)
+
+    if can_write:
+        save_desktop_settings(
+            dest,
+            stations,
+            tokens,
+            audio_device=audio_device,
+            capture_kind=capture_kind,
         )
+        write_public_config()
         return True
 
-    except OSError:
-        return False
+    handle, tmp = tempfile.mkstemp(prefix="atis-relay-", suffix=".env", text=True)
 
+    try:
+        os.close(handle)
+        save_desktop_settings(
+            tmp,
+            stations,
+            tokens,
+            audio_device=audio_device,
+            capture_kind=capture_kind,
+        )
+        os.chmod(tmp, 0o600)
+        res = run_ctl(["install-config", tmp])
+        return res is not None and res.returncode == 0
 
-def user_unit_dropin_dir():
-    return os.path.join(user_config_dir(), "systemd")
+    finally:
+        try:
+            os.remove(tmp)
+
+        except OSError:
+            pass

@@ -3,7 +3,7 @@ import threading
 import time
 
 from atis_relay_status import write_status
-from pi_atc_config import apply_user_paths, load_config
+from pi_atc_config import apply_runtime_paths, load_config
 
 
 def _desktop_reboot():
@@ -28,7 +28,7 @@ def _heartbeat_loop():
 
 
 def main():
-    apply_user_paths()
+    apply_runtime_paths()
     load_config()
     write_status(state="waiting")
     thread = threading.Thread(target=_heartbeat_loop, name="heartbeat", daemon=True)

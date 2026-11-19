@@ -13,7 +13,16 @@ disable_legacy_system_units() {
 }
 
 case "$1" in
-  remove|upgrade|deconfigure)
+  remove)
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl disable --now atis-relay.service >/dev/null 2>&1 || true
+    fi
+    disable_legacy_system_units
+    ;;
+  upgrade|deconfigure)
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl stop atis-relay.service >/dev/null 2>&1 || true
+    fi
     disable_legacy_system_units
     ;;
 esac

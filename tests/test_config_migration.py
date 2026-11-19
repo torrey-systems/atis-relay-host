@@ -70,8 +70,8 @@ class ConfigMigrationTest(unittest.TestCase):
 
         buf = io.StringIO()
 
-        with patch("pi_atc_config.env_path", return_value=self.dest):
-            with patch("pi_atc_config.LEGACY_ENV_PATH", self.legacy):
+        with patch("pi_atc_config.SYSTEM_ENV_PATH", self.dest):
+            with patch("pi_atc_config.candidate_legacy_env_paths", return_value=[self.legacy]):
                 with redirect_stdout(buf):
                     code = config.main(["migrate"])
 

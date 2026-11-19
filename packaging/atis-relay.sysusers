@@ -1,0 +1,3 @@
+u atis-relay - "ATIS Relay recorder" /var/lib/atis-relay /usr/sbin/nologin
+m atis-relay audio
+m atis-relay plugdev

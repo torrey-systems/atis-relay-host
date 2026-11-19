@@ -73,30 +73,54 @@ jobs:
           apt-get install -y "/dist/${DEB_FILE}"
           test -x /usr/bin/atis-relay
           test -x /usr/bin/pi-atc
+          test -x /usr/lib/atis-relay/atis-relay-ctl
           test -f /usr/share/applications/atis-relay.desktop
           grep -q '^Name=ATIS Relay' /usr/share/applications/atis-relay.desktop
           test -f /usr/share/icons/hicolor/scalable/apps/atis-relay.svg
-          test -f /usr/lib/systemd/user/atis-relay.service
+          test -f /lib/systemd/system/atis-relay.service
+          grep -q '^User=atis-relay$' /lib/systemd/system/atis-relay.service
+          grep -q '^Restart=always$' /lib/systemd/system/atis-relay.service
+          grep -q 'network-online.target' /lib/systemd/system/atis-relay.service
+          grep -q 'sound.target' /lib/systemd/system/atis-relay.service
+          grep -q 'WantedBy=multi-user.target' /lib/systemd/system/atis-relay.service
+          test ! -f /usr/lib/systemd/user/atis-relay.service
+          test -f /usr/share/polkit-1/actions/com.atisrelay.host.policy
+          test -f /usr/share/polkit-1/rules.d/10-com.atisrelay.host.rules
           test -f /opt/pi-atc/atis_relay_gui.py
           test ! -f /lib/systemd/system/pi-atc-setup.service
           test ! -f /etc/NetworkManager/conf.d/wifi-powersave-off.conf
-          python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config, atis_relay_status'
-          out=$(printf 'smoke-token-not-for-prod\n' | HOME=/tmp/atis-smoke atis-relay set-key 2>&1) || true
+          getent passwd atis-relay
+          getent group atis-relay
+          test -d /etc/atis-relay
+          test -d /var/lib/atis-relay
+          python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config, atis_relay_status, atis_relay_ctl'
+          printf 'STATIONS=KMYF:126.8\n' > /etc/atis-relay/env
+          chown atis-relay:atis-relay /etc/atis-relay/env
+          chmod 600 /etc/atis-relay/env
+          out=$(printf 'smoke-token-not-for-prod\n' | atis-relay set-key 2>&1) || true
           printf '%s\n' "$out"
           if printf '%s\n' "$out" | grep -q smoke-token-not-for-prod; then
             echo "token leaked from set-key"
             exit 1
           fi
-          test -f /tmp/atis-smoke/.config/atis-relay/env
-          grep -q '^STATION_TOKEN=smoke-token-not-for-prod$' /tmp/atis-smoke/.config/atis-relay/env
-          stat -c '%a' /tmp/atis-smoke/.config/atis-relay/env | grep -qx 600
-          status_out=$(HOME=/tmp/atis-smoke atis-relay status 2>&1)
+          test -f /etc/atis-relay/env
+          grep -q '^STATION_TOKEN=smoke-token-not-for-prod$' /etc/atis-relay/env
+          stat -c '%a' /etc/atis-relay/env | grep -qx 600
+          stat -c '%U' /etc/atis-relay/env | grep -qx atis-relay
+          test ! -d /tmp/atis-smoke/.config/atis-relay
+          status_out=$(atis-relay status 2>&1)
           printf '%s\n' "$status_out"
           if printf '%s\n' "$status_out" | grep -q smoke-token-not-for-prod; then
             echo "token leaked from status"
             exit 1
           fi
           printf '%s\n' "$status_out" | grep -qi 'token: set'
+          if [ -f /var/lib/atis-relay/public.json ]; then
+            if grep -q smoke-token-not-for-prod /var/lib/atis-relay/public.json; then
+              echo "token leaked from public config"
+              exit 1
+            fi
+          fi
           EOS
       - name: Attach deb to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

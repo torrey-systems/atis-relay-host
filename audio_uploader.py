@@ -8,7 +8,7 @@ import struct
 import math
 from atis_relay_status import suggestion_for_error, write_status
 from pi_atc_config import (
-    apply_user_paths,
+    apply_runtime_paths,
     atis_relay_url,
     load_config,
     parse_stations,
@@ -19,7 +19,7 @@ from pi_atc_state import derive_pi_id, record_last_upload, utc_now_iso
 
 WAIT_SEC = 60
 
-apply_user_paths()
+apply_runtime_paths()
 load_config()
 
 STATIONS = parse_stations(os.environ.get("STATIONS", ""))

@@ -3,9 +3,9 @@ import sys
 
 sys.path.insert(0, "/opt/pi-atc")
 
-from pi_atc_config import apply_user_paths
+from pi_atc_config import apply_runtime_paths
 
-apply_user_paths()
+apply_runtime_paths()
 
 argv = sys.argv[1:]
 
