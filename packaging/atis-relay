@@ -1,0 +1,21 @@
+#!/usr/bin/python3
+import sys
+
+sys.path.insert(0, "/opt/pi-atc")
+
+from pi_atc_config import apply_runtime_paths
+
+apply_runtime_paths()
+
+argv = sys.argv[1:]
+
+if argv and argv[0] in ("--worker", "worker"):
+    from atis_relay_worker import main
+    sys.exit(main())
+
+if argv and argv[0] in ("set-key", "set_key", "status"):
+    from pi_atc_cli import main
+    sys.exit(main())
+
+from atis_relay_gui import main
+sys.exit(main())

@@ -25,7 +25,7 @@ class ConfigMigrationTest(unittest.TestCase):
 
     def test_copies_unset_keys_without_printing_values(self):
         with open(self.legacy, "w") as f:
-            f.write("STATIONS=KMYF:126.8,KNKX:124.9\n")
+            f.write("STATIONS=KMYF:126.9,KNKX:124.9\n")
             f.write("PI_ID=nkx-relay\n")
             f.write("AWS_ACCESS_KEY_ID=AKIATESTNOTREAL1\n")
             f.write("AWS_SECRET_ACCESS_KEY=%s\n" % SECRET)
@@ -45,7 +45,7 @@ class ConfigMigrationTest(unittest.TestCase):
         self.assertNotIn(TOKEN, output)
         self.assertNotIn("AKIATESTNOTREAL1", output)
         dest = config.read_env_file(self.dest)
-        self.assertEqual(dest["STATIONS"], "KMYF:126.8,KNKX:124.9")
+        self.assertEqual(dest["STATIONS"], "KMYF:126.9,KNKX:124.9")
         self.assertEqual(dest["PI_ID"], "nkx-relay")
         self.assertEqual(dest["STATION_TOKEN"], TOKEN)
         self.assertEqual(dest["AWS_SECRET_ACCESS_KEY"], SECRET)
@@ -56,12 +56,12 @@ class ConfigMigrationTest(unittest.TestCase):
             f.write("STATIONS=KOLD:118.0\nPI_ID=old-id\n")
 
         with open(self.dest, "w") as f:
-            f.write("STATIONS=KMYF:126.8\nPI_ID=kept\n")
+            f.write("STATIONS=KMYF:126.9\nPI_ID=kept\n")
 
         copied = config.migrate_legacy_env(self.legacy, self.dest)
         dest = config.read_env_file(self.dest)
         self.assertEqual(copied, 0)
-        self.assertEqual(dest["STATIONS"], "KMYF:126.8")
+        self.assertEqual(dest["STATIONS"], "KMYF:126.9")
         self.assertEqual(dest["PI_ID"], "kept")
 
     def test_cli_migrate_does_not_print_secrets(self):
@@ -70,8 +70,8 @@ class ConfigMigrationTest(unittest.TestCase):
 
         buf = io.StringIO()
 
-        with patch("pi_atc_config.env_path", return_value=self.dest):
-            with patch("pi_atc_config.LEGACY_ENV_PATH", self.legacy):
+        with patch("pi_atc_config.SYSTEM_ENV_PATH", self.dest):
+            with patch("pi_atc_config.candidate_legacy_env_paths", return_value=[self.legacy]):
                 with redirect_stdout(buf):
                     code = config.main(["migrate"])
 
@@ -93,16 +93,16 @@ class ConfigMigrationTest(unittest.TestCase):
         self.assertEqual(config.upload_mode({}), "none")
         self.assertEqual(config.upload_mode({
             "STATION_TOKEN": "abc",
-            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATIONS": "KMYF:126.9,KSEE:125.45",
         }), "none")
         self.assertEqual(config.upload_mode({
             "STATION_TOKENS": "KMYF:abc,KSEE:def",
-            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATIONS": "KMYF:126.9,KSEE:125.45",
         }), "http")
 
     def test_station_token_for_icao(self):
         environ = {
-            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATIONS": "KMYF:126.9,KSEE:125.45",
             "STATION_TOKENS": "KMYF:tok-myf,KSEE:tok-see",
         }
         self.assertEqual(config.station_token_for("kmyf", environ), "tok-myf")
@@ -111,21 +111,21 @@ class ConfigMigrationTest(unittest.TestCase):
 
     def test_station_token_shorthand_single_station_only(self):
         self.assertEqual(config.station_token_for("KMYF", {
-            "STATIONS": "KMYF:126.8",
+            "STATIONS": "KMYF:126.9",
             "STATION_TOKEN": "only-one",
         }), "only-one")
         self.assertEqual(config.station_token_for("KMYF", {
-            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATIONS": "KMYF:126.9,KSEE:125.45",
             "STATION_TOKEN": "only-one",
         }), "")
         self.assertEqual(config.station_token_for("KSEE", {
-            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATIONS": "KMYF:126.9,KSEE:125.45",
             "STATION_TOKEN": "only-one",
         }), "")
 
     def test_migrate_station_tokens(self):
         with open(self.legacy, "w") as f:
-            f.write("STATIONS=KMYF:126.8,KSEE:135.1\n")
+            f.write("STATIONS=KMYF:126.9,KSEE:125.45\n")
             f.write("STATION_TOKENS=KMYF:%s,KSEE:%s\n" % (TOKEN, SECRET))
 
         copied = config.migrate_legacy_env(self.legacy, self.dest)

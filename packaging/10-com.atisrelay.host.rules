@@ -1,0 +1,7 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "com.atisrelay.host.ctl" &&
+        subject.local &&
+        subject.active) {
+        return polkit.Result.YES;
+    }
+});

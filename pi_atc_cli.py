@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import getpass
 import os
-import subprocess
 import sys
 
 from pi_atc_config import (
+    apply_runtime_paths,
     atis_relay_url,
     env_path,
     load_config,
@@ -18,19 +18,10 @@ from pi_atc_config import (
 )
 from pi_atc_state import read_last_heartbeat, read_last_upload, read_last_uploads, read_mode
 
-SERVICES_TO_RESTART = (
-    "pi-atc.service",
-    "pi-atc-heartbeat.service",
-)
+def default_restart(names=None):
+    from atis_relay_service import restart_worker
 
-
-def default_restart(names=SERVICES_TO_RESTART):
-    for name in names:
-        subprocess.run(
-            ["systemctl", "restart", name],
-            capture_output=True,
-            check=False,
-        )
+    restart_worker()
 
 
 def parse_set_key_args(argv):
@@ -97,16 +88,13 @@ def cmd_set_key(argv, stdin=None, stdout=None, restart_fn=None, path=None):
     if path is None:
         path = env_path()
 
-    if os.geteuid() != 0:
-        print("pi-atc set-key must be run as root", file=stdout)
-        return 1
-
     icao, parsed_token, parse_error = parse_set_key_args(argv)
 
     if parse_error:
         print(parse_error, file=stdout)
         return 1
 
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     token = read_token_value(parsed_token, stdin)
     scrub_token(token)
 
@@ -121,7 +109,7 @@ def cmd_set_key(argv, stdin=None, stdout=None, restart_fn=None, path=None):
         return 1
 
     restart_fn()
-    print("station key saved; services restarted", file=stdout)
+    print("station key saved", file=stdout)
     return 0
 
 
@@ -179,11 +167,14 @@ def cmd_status(stdout=None, environ=None):
 
 
 def usage(stdout):
-    print("usage: pi-atc set-key [--icao ICAO] [token]", file=stdout)
-    print("       pi-atc status", file=stdout)
+    print("usage: atis-relay", file=stdout)
+    print("       atis-relay set-key [--icao ICAO] [token]", file=stdout)
+    print("       atis-relay status", file=stdout)
 
 
 def main(argv=None, stdin=None, stdout=None, restart_fn=None, env_file=None):
+    apply_runtime_paths()
+
     if argv is None:
         argv = sys.argv[1:]
 

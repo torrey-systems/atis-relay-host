@@ -3,11 +3,28 @@ set -e
 
 case "$1" in
   purge)
-    rm -rf /etc/pi-atc /var/lib/pi-atc
+    rm -rf /etc/pi-atc /var/lib/pi-atc /etc/atis-relay /var/lib/atis-relay /opt/pi-atc
+    rm -f /etc/NetworkManager/conf.d/wifi-powersave-off.conf
+    rm -f /etc/systemd/journald.conf.d/pi-atc.conf
+
+    if getent passwd atis-relay >/dev/null 2>&1; then
+      deluser --system atis-relay >/dev/null 2>&1 || true
+    fi
+
+    if getent group atis-relay >/dev/null 2>&1; then
+      delgroup --system atis-relay >/dev/null 2>&1 || true
+    fi
     ;;
   remove)
+    rm -rf /opt/pi-atc/__pycache__
+    rmdir /opt/pi-atc >/dev/null 2>&1 || true
+
     if command -v systemctl >/dev/null 2>&1; then
       systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
     fi
     ;;
 esac

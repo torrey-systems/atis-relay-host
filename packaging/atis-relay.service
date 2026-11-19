@@ -1,0 +1,22 @@
+[Unit]
+Description=ATIS Relay recorder
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atis-relay
+Group=atis-relay
+SupplementaryGroups=audio plugdev
+WorkingDirectory=/opt/pi-atc
+Environment=PYTHONUNBUFFERED=1
+Environment=PI_ATC_ENV_FILE=/etc/atis-relay/env
+Environment=PI_ATC_STATE_DIR=/var/lib/atis-relay
+ExecStart=/usr/bin/atis-relay --worker
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

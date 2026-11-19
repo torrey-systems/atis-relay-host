@@ -17,7 +17,7 @@ class SetKeyTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.env_path = os.path.join(self.tmpdir.name, "env")
         with open(self.env_path, "w") as f:
-            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=\nSTATIONS=KMYF:126.8\n")
+            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=\nSTATIONS=KMYF:126.9\n")
         self.restarts = []
         self.prev_euid = os.geteuid
 
@@ -67,7 +67,7 @@ class SetKeyTest(unittest.TestCase):
         self.assertNotIn(TOKEN, stdout.getvalue())
         self.assertIn("STATION_TOKEN=%s\n" % TOKEN, open(self.env_path).read())
 
-    def test_set_key_requires_root(self):
+    def test_set_key_works_without_root(self):
         stdout = io.StringIO()
 
         with patch("os.geteuid", return_value=1):
@@ -78,19 +78,19 @@ class SetKeyTest(unittest.TestCase):
                 path=self.env_path,
             )
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
         self.assertNotIn(TOKEN, stdout.getvalue())
-        self.assertEqual(self.restarts, [])
-        self.assertNotIn(TOKEN, open(self.env_path).read())
+        self.assertTrue(self.restarts)
+        self.assertIn("STATION_TOKEN=%s\n" % TOKEN, open(self.env_path).read())
 
     def test_status_masks_token(self):
         with open(self.env_path, "w") as f:
-            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=%s\nSTATIONS=KMYF:126.8\n" % TOKEN)
+            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=%s\nSTATIONS=KMYF:126.9\n" % TOKEN)
 
         stdout = io.StringIO()
         environ = {
             "STATION_TOKEN": TOKEN,
-            "STATIONS": "KMYF:126.8",
+            "STATIONS": "KMYF:126.9",
             "ATIS_RELAY_URL": "https://atisrelay.com",
             "PI_ATC_ENV_FILE": self.env_path,
             "PI_ATC_STATE_DIR": self.tmpdir.name,
@@ -103,11 +103,11 @@ class SetKeyTest(unittest.TestCase):
         output = stdout.getvalue()
         self.assertNotIn(TOKEN, output)
         self.assertIn("token: set", output)
-        self.assertIn("KMYF:126.8", output)
+        self.assertIn("KMYF:126.9", output)
 
     def test_set_key_with_icao_for_second_station(self):
         with open(self.env_path, "w") as f:
-            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=\nSTATION_TOKENS=\nSTATIONS=KMYF:126.8,KSEE:135.1\n")
+            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=\nSTATION_TOKENS=\nSTATIONS=KMYF:126.9,KSEE:125.45\n")
 
         other = "other-secret-station-token-abc"
         stdout = io.StringIO()
@@ -129,7 +129,7 @@ class SetKeyTest(unittest.TestCase):
 
     def test_set_key_requires_icao_when_two_stations(self):
         with open(self.env_path, "w") as f:
-            f.write("STATIONS=KMYF:126.8,KSEE:135.1\nSTATION_TOKEN=\n")
+            f.write("STATIONS=KMYF:126.9,KSEE:125.45\nSTATION_TOKEN=\n")
 
         stdout = io.StringIO()
 
@@ -153,7 +153,7 @@ class SetKeyTest(unittest.TestCase):
         environ = {
             "STATION_TOKEN": "",
             "STATION_TOKENS": "KMYF:%s,KSEE:%s" % (TOKEN, other),
-            "STATIONS": "KMYF:126.8,KSEE:135.1",
+            "STATIONS": "KMYF:126.9,KSEE:125.45",
             "ATIS_RELAY_URL": "https://atisrelay.com",
             "PI_ATC_ENV_FILE": self.env_path,
             "PI_ATC_STATE_DIR": self.tmpdir.name,
@@ -167,8 +167,8 @@ class SetKeyTest(unittest.TestCase):
         output = stdout.getvalue()
         self.assertNotIn(TOKEN, output)
         self.assertNotIn(other, output)
-        self.assertIn("KMYF:126.8 token: set", output)
-        self.assertIn("KSEE:135.1 token: set", output)
+        self.assertIn("KMYF:126.9 token: set", output)
+        self.assertIn("KSEE:125.45 token: set", output)
 
 
 if __name__ == "__main__":

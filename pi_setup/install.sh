@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[install] Factory image script. For a desktop Pi, install the .deb from GitHub Releases instead."
+
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run as root: sudo bash install.sh"
     exit 1

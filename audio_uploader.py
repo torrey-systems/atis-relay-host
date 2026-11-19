@@ -6,7 +6,9 @@ import tempfile
 import subprocess
 import struct
 import math
+from atis_relay_status import suggestion_for_error, write_status
 from pi_atc_config import (
+    apply_runtime_paths,
     atis_relay_url,
     load_config,
     parse_stations,
@@ -17,6 +19,7 @@ from pi_atc_state import derive_pi_id, record_last_upload, utc_now_iso
 
 WAIT_SEC = 60
 
+apply_runtime_paths()
 load_config()
 
 STATIONS = parse_stations(os.environ.get("STATIONS", ""))
@@ -137,6 +140,9 @@ USB_DRIVER_UNBIND = "/sys/bus/usb/drivers/usb/unbind"
 USB_DRIVER_BIND = "/sys/bus/usb/drivers/usb/bind"
 
 def set_usb_power(on):
+    if os.geteuid() != 0:
+        return
+
     if not on:
         for path in USB_AUTH_PATHS:
             try:
@@ -167,6 +173,27 @@ def set_usb_power(on):
             pass
 
 def record_wav(out_path: str, freq_mhz: str) -> bool:
+    kind = os.environ.get("CAPTURE_KIND", "sdr").strip().lower()
+    device = os.environ.get("AUDIO_DEVICE", AUDIO_DEVICE)
+
+    if kind == "alsa":
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "alsa",
+            "-i", device,
+            "-ac", str(CHANNELS),
+            "-ar", str(SAMPLE_RATE),
+            "-t", str(CHUNK_SEC),
+            out_path,
+        ]
+
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            return res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > MIN_WAV_BYTES
+
+        except Exception:
+            return False
+
     if sys.platform == "darwin":
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -227,12 +254,14 @@ def wait_for_config():
         if STATIONS and mode != "none":
             return mode
 
+        message, fix = suggestion_for_error("missing_key")
+        write_status(state="waiting", error=message, fix=fix)
+
         if not STATIONS:
-            print("[wait] no stations configured; set them in the setup portal or /etc/pi-atc/env")
+            print("[wait] no stations configured; open the ATIS Relay app")
 
         else:
-            hint = STATIONS[0][0] if STATIONS else "ICAO"
-            print("[wait] station token not configured; set a key with: sudo pi-atc set-key --icao %s" % hint)
+            print("[wait] station token not configured; open the ATIS Relay app")
 
         time.sleep(WAIT_SEC)
 
@@ -258,11 +287,15 @@ def upload_file_http(mp3_path: str, icao: str) -> str | None:
     token = station_token_for(icao)
 
     if not token:
-        print("[wait] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        message, fix = suggestion_for_error("missing_key")
+        write_status(state="error", error=message, fix=fix)
+        print("[wait] %s: station token not configured; open the ATIS Relay app" % icao)
         return None
 
     if _rejected_tokens.get(icao) == token:
-        print("[wait] %s: station token rejected; set a valid key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        message, fix = suggestion_for_error("bad_key")
+        write_status(state="error", error=message, fix=fix)
+        print("[wait] %s: station token rejected; open the ATIS Relay app" % icao)
         return None
 
     filename = os.path.basename(mp3_path)
@@ -278,23 +311,40 @@ def upload_file_http(mp3_path: str, icao: str) -> str | None:
             filename=filename,
         )
         print(f"[upload] {icao} {filename}")
+        write_status(state="listening", last_upload=utc_now_iso())
         return key
 
     except AuthRejected as exc:
         _rejected_tokens[icao] = token
-        print("[error] %s: %s; set a valid key with: sudo pi-atc set-key --icao %s" % (icao, exc, icao))
+        message, fix = suggestion_for_error("bad_key")
+        write_status(state="error", error=message, fix=fix)
+        print("[error] %s: %s; open the ATIS Relay app to paste a new key" % (icao, exc))
         return None
 
     except Forbidden as exc:
         _rejected_tokens[icao] = token
-        print("[error] %s: %s; set this airport's key with: sudo pi-atc set-key --icao %s" % (icao, exc, icao))
+        message, fix = suggestion_for_error("wrong_airport")
+        write_status(state="error", error=message, fix=fix)
+        print("[error] %s: %s; open the ATIS Relay app to paste this airport's key" % (icao, exc))
         return None
 
     except TransientError as exc:
+        message, fix = suggestion_for_error("upload_failed")
+        write_status(state="error", error=message, fix=fix)
         print(f"[error] {icao}: upload retry exhausted: {exc}")
         return None
 
     except ClientError as exc:
+        kind = "upload_failed"
+
+        if getattr(exc, "status_code", None) == 413:
+            kind = "too_large"
+
+        if getattr(exc, "status_code", None) == 429:
+            kind = "rate_limited"
+
+        message, fix = suggestion_for_error(kind)
+        write_status(state="error", error=message, fix=fix)
         print(f"[error] {icao}: {exc}")
         return None
 
@@ -322,7 +372,7 @@ def upload_file(path: str, icao: str) -> str | None:
         if mode == "s3":
             return upload_file_s3(mp3_path, icao)
 
-        print("[wait] %s: station token not configured; set a key with: sudo pi-atc set-key --icao %s" % (icao, icao))
+        print("[wait] %s: station token not configured; open the ATIS Relay app" % icao)
         return None
     except Exception as e:
         print(f"[error] Failed to upload file: {e}")
@@ -374,7 +424,9 @@ def main():
         STATIONS = parse_stations(os.environ.get("STATIONS", ""))
 
         if not STATIONS:
-            print("[wait] no stations configured; set them in the setup portal or /etc/pi-atc/env")
+            message, fix = suggestion_for_error("missing_key")
+            write_status(state="waiting", error=message, fix=fix)
+            print("[wait] no stations configured; open the ATIS Relay app")
             time.sleep(WAIT_SEC)
             continue
 
@@ -386,16 +438,19 @@ def main():
 
         icao, freq = STATIONS[station_idx]
         print(f"[station] {icao} @ {freq} MHz")
+        write_status(state="listening")
 
         with tempfile.NamedTemporaryFile(prefix=f"{icao}_", suffix=".wav", dir=TMP_DIR, delete=False) as tf:
             wav_path = tf.name
 
         ok = record_wav(wav_path, freq)
         if not ok:
-            if thermal_recovery:
+            if thermal_recovery and os.geteuid() == 0:
                 print("[temp] recording failed after USB re-enable, rebooting")
                 subprocess.run(["reboot"], check=False)
                 time.sleep(120)
+            message, fix = suggestion_for_error("capture_failed")
+            write_status(state="error", error=message, fix=fix)
             print(f"[capture] recording failed for {icao}; retrying in 3s")
             try:
                 os.remove(wav_path)
@@ -417,6 +472,7 @@ def main():
                 print(f"[skip] {icao} audio too similar to previous chunk")
                 st["prev_envelope"] = env
             else:
+                write_status(state="uploading")
                 key = upload_file(wav_path, icao)
                 if key:
                     st["prev_envelope"] = env

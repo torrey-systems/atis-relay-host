@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ATIS Relay
+Comment=Record ATIS audio and send it to ATIS Relay
+Exec=atis-relay
+Icon=atis-relay
+Terminal=false
+Categories=Network;AudioVideo;
+StartupNotify=true
+Keywords=ATIS;aviation;radio;

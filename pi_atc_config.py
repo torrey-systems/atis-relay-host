@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import stat
 import sys
@@ -6,8 +7,45 @@ import sys
 from dotenv import load_dotenv
 
 DEFAULT_ENV_PATH = "/etc/pi-atc/env"
+SYSTEM_ENV_PATH = "/etc/atis-relay/env"
+SYSTEM_STATE_DIR = "/var/lib/atis-relay"
+SYSTEM_PUBLIC_PATH = "/var/lib/atis-relay/public.json"
 LEGACY_ENV_PATH = "/opt/pi-atc/.env"
 DEFAULT_ATIS_RELAY_URL = "https://atisrelay.com"
+APP_ID = "atis-relay"
+SERVICE_USER = "atis-relay"
+
+
+def xdg_dir(env_name, fallback):
+    value = os.environ.get(env_name)
+
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+
+    return os.path.join(os.path.expanduser("~"), fallback)
+
+
+def user_config_dir():
+    return os.path.join(xdg_dir("XDG_CONFIG_HOME", ".config"), APP_ID)
+
+
+def user_state_dir():
+    return os.path.join(xdg_dir("XDG_DATA_HOME", ".local/share"), APP_ID)
+
+
+def user_env_path():
+    return os.path.join(user_config_dir(), "env")
+
+
+def apply_runtime_paths():
+    os.environ.setdefault("PI_ATC_ENV_FILE", SYSTEM_ENV_PATH)
+    os.environ.setdefault("PI_ATC_STATE_DIR", SYSTEM_STATE_DIR)
+
+
+def apply_user_paths():
+    apply_runtime_paths()
+
+
 SECRET_KEYS = (
     "STATION_TOKEN",
     "STATION_TOKENS",
@@ -32,6 +70,7 @@ MIGRATE_KEYS = (
     "AWS_SECRET_ACCESS_KEY",
     "TEMP_SHUTDOWN_C",
     "TEMP_RESUME_C",
+    "CAPTURE_KIND",
 )
 
 
@@ -41,18 +80,20 @@ def env_path():
     if isinstance(override, str) and override.strip():
         return override.strip()
 
-    return DEFAULT_ENV_PATH
+    return SYSTEM_ENV_PATH
 
 
 def env_search_paths():
-    paths = []
-    primary = env_path()
-    paths.append(primary)
+    return [env_path()]
 
-    if LEGACY_ENV_PATH not in paths:
-        paths.append(LEGACY_ENV_PATH)
 
-    return paths
+def public_config_path():
+    override = os.environ.get("PI_ATC_PUBLIC_FILE")
+
+    if isinstance(override, str) and override.strip():
+        return override.strip()
+
+    return os.path.join(os.environ.get("PI_ATC_STATE_DIR", SYSTEM_STATE_DIR), "public.json")
 
 
 def load_config():
@@ -173,7 +214,7 @@ def set_station_token(path, token, icao=None):
 
     else:
         if len(icaos) > 1:
-            return "more than one station configured; use: sudo pi-atc set-key --icao %s" % icaos[0]
+            return "more than one station configured; use: atis-relay set-key --icao %s" % icaos[0]
 
         if len(icaos) == 1:
             tokens[icaos[0]] = token
@@ -182,6 +223,7 @@ def set_station_token(path, token, icao=None):
             data["STATION_TOKEN"] = token
             data["STATION_TOKENS"] = format_station_tokens(tokens)
             write_env_file(path, data)
+            write_public_config(data)
             return None
 
     data["STATION_TOKENS"] = format_station_tokens(tokens)
@@ -196,7 +238,124 @@ def set_station_token(path, token, icao=None):
         data["ATIS_RELAY_URL"] = DEFAULT_ATIS_RELAY_URL
 
     write_env_file(path, data)
+    write_public_config(data)
     return None
+
+
+def save_desktop_settings(path, stations, tokens, audio_device="", capture_kind="sdr"):
+    data = read_env_file(path) if os.path.isfile(path) else {}
+
+    if "ATIS_RELAY_URL" not in data or data.get("ATIS_RELAY_URL") == "":
+        data["ATIS_RELAY_URL"] = DEFAULT_ATIS_RELAY_URL
+
+    data["STATIONS"] = ",".join("%s:%s" % (icao, freq) for icao, freq in stations)
+    incoming = dict(tokens or {})
+    existing = parse_station_tokens(data.get("STATION_TOKENS", ""))
+
+    for icao, token in incoming.items():
+        if token:
+            existing[icao] = token
+
+    keep = {icao for icao, _freq in stations}
+
+    for icao in list(existing):
+        if keep and icao not in keep:
+            del existing[icao]
+
+    data["STATION_TOKENS"] = format_station_tokens(existing)
+
+    if len(stations) <= 1 and len(existing) == 1:
+        data["STATION_TOKEN"] = next(iter(existing.values()))
+
+    else:
+        data["STATION_TOKEN"] = ""
+
+    if audio_device:
+        data["AUDIO_DEVICE"] = audio_device
+
+    if capture_kind:
+        data["CAPTURE_KIND"] = capture_kind
+
+    write_env_file(path, data)
+    write_public_config(data)
+    return None
+
+
+def public_payload(data):
+    stations = parse_stations(data.get("STATIONS", "") if data else "")
+    tokens = {}
+
+    for icao, _freq in stations:
+        tokens[icao] = bool(station_token_for(icao, data))
+
+    return {
+        "stations": [[icao, freq] for icao, freq in stations],
+        "audio_device": ((data or {}).get("AUDIO_DEVICE") or "").strip(),
+        "capture_kind": ((data or {}).get("CAPTURE_KIND") or "sdr").strip() or "sdr",
+        "tokens": tokens,
+    }
+
+
+def write_public_config(data=None):
+    if data is None:
+        data = read_env_file(env_path())
+
+    payload = public_payload(data)
+    path = public_config_path()
+    directory = os.path.dirname(path)
+
+    try:
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+            f.write("\n")
+
+        os.replace(tmp, path)
+        os.chmod(path, 0o644)
+        _chown_service_user(path)
+
+    except OSError:
+        return payload
+
+    return payload
+
+
+def read_public_config():
+    path = public_config_path()
+
+    try:
+        with open(path) as f:
+            data = json.load(f)
+
+    except (OSError, json.JSONDecodeError, ValueError):
+        data = None
+
+    if not isinstance(data, dict):
+        return {
+            "stations": [],
+            "audio_device": "",
+            "capture_kind": "sdr",
+            "tokens": {},
+        }
+
+    stations = data.get("stations") or []
+    tokens = data.get("tokens") or {}
+
+    if not isinstance(stations, list):
+        stations = []
+
+    if not isinstance(tokens, dict):
+        tokens = {}
+
+    return {
+        "stations": stations,
+        "audio_device": data.get("audio_device") or "",
+        "capture_kind": data.get("capture_kind") or "sdr",
+        "tokens": tokens,
+    }
 
 
 def atis_relay_url(environ=None):
@@ -280,14 +439,24 @@ def write_env_file(path, data, mode=0o600):
 
     os.replace(tmp, path)
     os.chmod(path, mode)
+    _chown_service_user(path)
 
-    try:
-        os.chown(path, 0, 0)
-
-    except OSError:
-        pass
+    if directory and os.path.abspath(directory) == os.path.abspath(os.path.dirname(SYSTEM_ENV_PATH)):
+        _chown_service_user(directory)
 
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _chown_service_user(path):
+    try:
+        import pwd
+        pw = pwd.getpwnam(SERVICE_USER)
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+
+    except (ImportError, KeyError, OSError, PermissionError):
+        return False
+
+    return True
 
 
 def set_env_value(path, key, value):
@@ -337,6 +506,92 @@ def migrate_legacy_env(legacy_path=None, dest_path=None):
 
     if copied or not os.path.isfile(dest_path):
         write_env_file(dest_path, dest)
+        write_public_config(dest)
+
+    return copied
+
+
+def candidate_legacy_env_paths():
+    paths = []
+    home_root = "/home"
+
+    try:
+        names = os.listdir(home_root)
+
+    except OSError:
+        names = []
+
+    for name in names:
+        if not name or name.startswith("."):
+            continue
+
+        candidate = os.path.join(home_root, name, ".config", APP_ID, "env")
+
+        if os.path.isfile(candidate):
+            paths.append(candidate)
+
+    for item in (DEFAULT_ENV_PATH, LEGACY_ENV_PATH):
+        if os.path.isfile(item) and item not in paths:
+            paths.append(item)
+
+    return paths
+
+
+def migrate_to_system_env(dest_path=None, extra_sources=None):
+    if dest_path is None:
+        dest_path = SYSTEM_ENV_PATH
+
+    sources = []
+
+    if extra_sources is None:
+        sources.extend(candidate_legacy_env_paths())
+
+    else:
+        sources.extend(extra_sources)
+
+    dest = read_env_file(dest_path) if os.path.isfile(dest_path) else {}
+    copied = 0
+
+    for src_path in sources:
+        if not src_path or src_path == dest_path:
+            continue
+
+        if not os.path.isfile(src_path):
+            continue
+
+        copied += _copy_unset_keys(src_path, dest)
+
+    if "ATIS_RELAY_URL" not in dest or dest.get("ATIS_RELAY_URL") == "":
+        dest["ATIS_RELAY_URL"] = DEFAULT_ATIS_RELAY_URL
+
+    if "STATION_TOKEN" not in dest:
+        dest["STATION_TOKEN"] = ""
+
+    if "STATION_TOKENS" not in dest:
+        dest["STATION_TOKENS"] = ""
+
+    if copied or not os.path.isfile(dest_path):
+        write_env_file(dest_path, dest)
+
+    write_public_config(dest)
+    return copied
+
+
+def _copy_unset_keys(src_path, dest):
+    src = read_env_file(src_path)
+    copied = 0
+
+    for key in MIGRATE_KEYS:
+        incoming = src.get(key)
+
+        if incoming is None or incoming == "":
+            continue
+
+        current = dest.get(key)
+
+        if current is None or current == "":
+            dest[key] = incoming
+            copied += 1
 
     return copied
 
@@ -346,8 +601,8 @@ def main(argv=None):
         argv = sys.argv[1:]
 
     if argv and argv[0] == "migrate":
-        n = migrate_legacy_env()
-        print("[migrate] copied %d unset keys from legacy env" % n)
+        n = migrate_to_system_env()
+        print("[migrate] copied %d unset keys from a previous config" % n)
         return 0
 
     return 1
