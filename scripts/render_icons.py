@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Render hicolor PNG sizes from the official 256px ATIS Relay logo.
+"""Render hicolor icons from the official ATIS Relay square.
 
-The attached SVG export does not match the 256px render (white plane with a
-leaf-like trail on a dark square). PNG sizes and the scalable SVG are built
-from that 256px render so the menu, window, and README icons match.
+The Figma SVG export embeds a taller PNG and a pattern transform. librsvg
+treats that as a zoomed crop of the plane. The attached 256px render is the
+full square as drawn (white plane and leaf trail on a dark background).
+
+Every PNG size and the scalable SVG is that square scaled uniformly. There
+is no extra crop or rotation.
 """
 import base64
 import io
 import os
+import shutil
+import subprocess
 import sys
 
 from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SOURCE = os.path.join(ROOT, "packaging", "icons", "hicolor", "256x256", "apps", "atis-relay.png")
+SOURCE = os.path.join(ROOT, "packaging", "icons", "source", "atis-relay.png")
 SIZES = (16, 32, 48, 64, 128, 256, 512)
 
 
@@ -29,48 +34,83 @@ def save_png(image, path):
         handle.write(buf.getvalue())
 
 
+def write_square_svg(png_path, svg_path, side):
+    png_bytes = open(png_path, "rb").read()
+    b64 = base64.b64encode(png_bytes).decode("ascii")
+    os.makedirs(os.path.dirname(svg_path), exist_ok=True)
+    svg = """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="%s" height="%s" viewBox="0 0 %s %s">
+  <image x="0" y="0" width="%s" height="%s" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,%s" xlink:href="data:image/png;base64,%s"/>
+</svg>
+""" % (side, side, side, side, side, side, b64, b64)
+    with open(svg_path, "w") as handle:
+        handle.write(svg)
+
+
+def hicolor_png(size):
+    return os.path.join(
+        ROOT,
+        "packaging",
+        "icons",
+        "hicolor",
+        "%sx%s" % (size, size),
+        "apps",
+        "atis-relay.png",
+    )
+
+
 def main():
     if not os.path.isfile(SOURCE):
         print("missing source icon %s" % SOURCE, file=sys.stderr)
         return 1
 
     source = Image.open(SOURCE).convert("RGBA")
+
+    if source.size[0] != source.size[1]:
+        print("source icon must be square, got %s" % (source.size,), file=sys.stderr)
+        return 1
+
     clean = Image.new("RGBA", source.size)
     clean.putdata(list(source.getdata()))
-
-    for size in SIZES:
-        if size == source.size[0]:
-            out = clean
-
-        else:
-            out = clean.resize((size, size), Image.Resampling.LANCZOS)
-
-        dest = os.path.join(
-            ROOT,
-            "packaging",
-            "icons",
-            "hicolor",
-            "%sx%s" % (size, size),
-            "apps",
-            "atis-relay.png",
-        )
-        save_png(out, dest)
+    png_256 = hicolor_png(256)
+    os.makedirs(os.path.dirname(png_256), exist_ok=True)
+    shutil.copyfile(SOURCE, png_256)
 
     docs = os.path.join(ROOT, "docs", "images")
     os.makedirs(docs, exist_ok=True)
-    save_png(clean, os.path.join(docs, "logo.png"))
-    png_512 = os.path.join(ROOT, "packaging", "icons", "hicolor", "512x512", "apps", "atis-relay.png")
-    png_bytes = open(png_512, "rb").read()
-    b64 = base64.b64encode(png_bytes).decode("ascii")
-    svg_dir = os.path.join(ROOT, "packaging", "icons", "hicolor", "scalable", "apps")
-    os.makedirs(svg_dir, exist_ok=True)
-    svg = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 512 512">
-  <image width="512" height="512" href="data:image/png;base64,%s" xlink:href="data:image/png;base64,%s"/>
-</svg>
-""" % (b64, b64)
-    with open(os.path.join(svg_dir, "atis-relay.svg"), "w") as handle:
-        handle.write(svg)
+    shutil.copyfile(SOURCE, os.path.join(docs, "logo.png"))
+
+    svg_path = os.path.join(ROOT, "packaging", "icons", "hicolor", "scalable", "apps", "atis-relay.svg")
+    write_square_svg(SOURCE, svg_path, source.size[0])
+
+    for size in SIZES:
+        dest = hicolor_png(size)
+
+        if size == source.size[0]:
+            continue
+
+        rendered = None
+        rsvg = shutil.which("rsvg-convert")
+
+        if rsvg:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            result = subprocess.run(
+                [rsvg, "-w", str(size), "-h", str(size), svg_path, "-o", dest],
+                check=False,
+            )
+
+            if result.returncode == 0 and os.path.isfile(dest):
+                rendered = Image.open(dest).convert("RGBA")
+
+                if rendered.size != (size, size):
+                    rendered = None
+
+        if rendered is None:
+            rendered = clean.resize((size, size), Image.Resampling.LANCZOS)
+            save_png(rendered, dest)
+
+        else:
+            save_png(rendered, dest)
 
     return 0
 

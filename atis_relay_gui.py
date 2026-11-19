@@ -6,7 +6,8 @@ import threading
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf, GLib, Gtk
 
 from atis_relay_devices import list_capture_devices, test_capture
 from atis_relay_service import (
@@ -33,6 +34,7 @@ KEY_HINT = "Enter the airport code and ATIS frequency. Paste the station key ATI
 KEY_MISSING_1 = "Paste the station key ATIS Relay sent you."
 KEY_MISSING_2 = "Paste the station key ATIS Relay sent you for airport 2."
 ICON_NAME = "atis-relay"
+HEADER_LOGO_PX = 128
 
 
 def icon_file(size="256x256"):
@@ -54,7 +56,7 @@ def icon_file(size="256x256"):
 
 def apply_app_icon(window=None):
     Gtk.Window.set_default_icon_name(ICON_NAME)
-    path = icon_file("256x256") or icon_file("128x128") or icon_file("64x64")
+    path = icon_file("256x256") or icon_file("512x512") or icon_file("128x128")
 
     if not path:
         return
@@ -67,6 +69,34 @@ def apply_app_icon(window=None):
 
     except Exception:
         return
+
+
+def header_logo_image():
+    path = icon_file("256x256") or icon_file("512x512") or icon_file("128x128")
+
+    if not path:
+        return None
+
+    try:
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+
+        if pixbuf.get_width() != HEADER_LOGO_PX or pixbuf.get_height() != HEADER_LOGO_PX:
+            pixbuf = pixbuf.scale_simple(
+                HEADER_LOGO_PX,
+                HEADER_LOGO_PX,
+                GdkPixbuf.InterpType.HYPER,
+            )
+
+        image = Gtk.Image.new_from_pixbuf(pixbuf)
+        image.set_pixel_size(HEADER_LOGO_PX)
+        return image
+
+    except Exception:
+        try:
+            return Gtk.Image.new_from_file(path)
+
+        except Exception:
+            return None
 
 
 def _valid_freq(text):
@@ -91,10 +121,9 @@ class AtisRelayWindow(Gtk.Window):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         self.add(outer)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        logo_path = icon_file("128x128") or icon_file("64x64") or icon_file("48x48")
+        logo = header_logo_image()
 
-        if logo_path:
-            logo = Gtk.Image.new_from_file(logo_path)
+        if logo is not None:
             header.pack_start(logo, False, False, 0)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)

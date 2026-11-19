@@ -261,6 +261,20 @@ class IconPackagingTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(path), path)
             self.assertGreater(os.path.getsize(path), 100)
 
+        source = os.path.join(ROOT, "packaging", "icons", "source", "atis-relay.png")
+        self.assertTrue(os.path.isfile(source))
+        with open(scalable) as svg_file:
+            svg = svg_file.read()
+        self.assertNotIn("rotate", svg)
+        self.assertNotIn("translate", svg)
+        self.assertIn('preserveAspectRatio="xMidYMid meet"', svg)
+
+        gui_path = os.path.join(ROOT, "atis_relay_gui.py")
+        with open(gui_path) as gui_file:
+            gui = gui_file.read()
+        self.assertIn("header_logo_image", gui)
+        self.assertIn('icon_file("256x256")', gui)
+
 
 if __name__ == "__main__":
     unittest.main()
