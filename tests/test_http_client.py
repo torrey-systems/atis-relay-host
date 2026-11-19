@@ -280,7 +280,7 @@ class HeartbeatHttpTest(unittest.TestCase):
         os.environ["PI_ATC_STATE_DIR"] = self.tmpdir.name
         os.environ["STATION_TOKEN"] = "tok"
         os.environ.pop("STATION_TOKENS", None)
-        os.environ["STATIONS"] = "KMYF:126.8"
+        os.environ["STATIONS"] = "KMYF:126.9"
         self.reboots = []
 
     def tearDown(self):
@@ -346,7 +346,7 @@ class HeartbeatHttpTest(unittest.TestCase):
 
         os.environ.pop("STATION_TOKEN", None)
         os.environ["STATION_TOKENS"] = "KMYF:tok-myf,KSEE:tok-see"
-        os.environ["STATIONS"] = "KMYF:126.8,KSEE:135.1"
+        os.environ["STATIONS"] = "KMYF:126.9,KSEE:125.45"
         session = FakeSession([
             FakeResponse(200, {"ok": True}),
             FakeResponse(200, {"commands": []}),
@@ -374,7 +374,7 @@ class HeartbeatHttpTest(unittest.TestCase):
 
         os.environ["STATION_TOKEN"] = "shared-token"
         os.environ.pop("STATION_TOKENS", None)
-        os.environ["STATIONS"] = "KMYF:126.8,KSEE:135.1"
+        os.environ["STATIONS"] = "KMYF:126.9,KSEE:125.45"
         session = FakeSession([])
         status = heartbeat.run_http_checkin(
             reboot_fn=lambda: self.reboots.append("nope"),

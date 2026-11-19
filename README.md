@@ -39,7 +39,7 @@ The window looks like this when you add airports:
 ## 4. Add your airport and key
 
 1. Type the airport code (for example `KMYF`).
-2. Type the ATIS frequency in MHz (for example `126.8`).
+2. Type the ATIS frequency in MHz (for example `126.9` for KMYF, or `125.45` for KSEE).
 3. Paste the station key ATIS Relay sent you. The field hides the key.
 4. A second airport is optional. Each airport needs its own key.
 5. Click **Next**.

@@ -102,7 +102,7 @@ jobs:
           test -d /etc/atis-relay
           test -d /var/lib/atis-relay
           python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config, atis_relay_status, atis_relay_ctl'
-          printf 'STATIONS=KMYF:126.8\n' > /etc/atis-relay/env
+          printf 'STATIONS=KMYF:126.9\n' > /etc/atis-relay/env
           chown atis-relay:atis-relay /etc/atis-relay/env
           chmod 600 /etc/atis-relay/env
           out=$(printf 'smoke-token-not-for-prod\n' | atis-relay set-key 2>&1) || true

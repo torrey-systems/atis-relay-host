@@ -41,7 +41,7 @@ class DesktopConfigTest(unittest.TestCase):
     def test_save_settings_mode_600_and_public_config_omits_token(self):
         config.save_desktop_settings(
             self.env_file,
-            [("KMYF", "126.8")],
+            [("KMYF", "126.9")],
             {"KMYF": TOKEN},
             audio_device="plughw:1,0",
             capture_kind="alsa",
@@ -52,7 +52,7 @@ class DesktopConfigTest(unittest.TestCase):
         self.assertIn("STATION_TOKEN=%s\n" % TOKEN, data)
         self.assertIn("CAPTURE_KIND=alsa", data)
         public = config.read_public_config()
-        self.assertEqual(public["stations"], [["KMYF", "126.8"]])
+        self.assertEqual(public["stations"], [["KMYF", "126.9"]])
         self.assertEqual(public["tokens"]["KMYF"], True)
         with open(config.public_config_path()) as public_file:
             self.assertNotIn(TOKEN, public_file.read())
@@ -60,8 +60,8 @@ class DesktopConfigTest(unittest.TestCase):
         self.assertEqual(config.env_path(), self.env_file)
 
     def test_save_keeps_existing_key_when_blank(self):
-        config.save_desktop_settings(self.env_file, [("KMYF", "126.8")], {"KMYF": TOKEN})
-        config.save_desktop_settings(self.env_file, [("KMYF", "126.8")], {"KMYF": ""})
+        config.save_desktop_settings(self.env_file, [("KMYF", "126.9")], {"KMYF": TOKEN})
+        config.save_desktop_settings(self.env_file, [("KMYF", "126.9")], {"KMYF": ""})
         data = config.read_env_file(self.env_file)
         self.assertEqual(data["STATION_TOKEN"], TOKEN)
 
@@ -74,7 +74,7 @@ class DesktopConfigTest(unittest.TestCase):
         src = os.path.join(self.tmpdir.name, "old.env")
         dest = os.path.join(self.tmpdir.name, "new.env")
         with open(src, "w") as f:
-            f.write("STATIONS=KMYF:126.8\nSTATION_TOKEN=%s\nCAPTURE_KIND=sdr\n" % TOKEN)
+            f.write("STATIONS=KMYF:126.9\nSTATION_TOKEN=%s\nCAPTURE_KIND=sdr\n" % TOKEN)
 
         copied = config.migrate_to_system_env(dest_path=dest, extra_sources=[src])
         self.assertGreater(copied, 0)
@@ -171,7 +171,7 @@ class ServiceCtlTest(unittest.TestCase):
             "PI_ATC_STATE_DIR": state_dir,
         }):
             ok = service.install_settings(
-                [("KMYF", "126.8")],
+                [("KMYF", "126.9")],
                 {"KMYF": TOKEN},
                 capture_kind="sdr",
             )
@@ -194,7 +194,7 @@ class HelperCtlTest(unittest.TestCase):
         state_dir = os.path.join(tmpdir.name, "state")
         os.makedirs(state_dir, exist_ok=True)
         with open(src, "w") as f:
-            f.write("STATIONS=KMYF:126.8\nSTATION_TOKENS=KMYF:%s\nCAPTURE_KIND=sdr\n" % TOKEN)
+            f.write("STATIONS=KMYF:126.9\nSTATION_TOKENS=KMYF:%s\nCAPTURE_KIND=sdr\n" % TOKEN)
         os.chmod(src, 0o600)
 
         with patch.dict(os.environ, {
@@ -216,7 +216,7 @@ class HelperCtlTest(unittest.TestCase):
         tmpdir = tempfile.TemporaryDirectory()
         src = os.path.join(tmpdir.name, "incoming.env")
         with open(src, "w") as f:
-            f.write("STATIONS=KMYF:126.8\nSTATION_TOKEN=%s\n" % TOKEN)
+            f.write("STATIONS=KMYF:126.9\nSTATION_TOKEN=%s\n" % TOKEN)
         os.chmod(src, 0o666)
 
         with patch("os.geteuid", return_value=0):
@@ -239,6 +239,14 @@ class WordingTest(unittest.TestCase):
         self.assertNotIn("~/.config/atis-relay", readme)
         self.assertNotIn("\u2014", readme)
         self.assertIn("docs/images/logo.png", readme)
+        self.assertIn("126.9", gui)
+        self.assertIn("125.45", gui)
+        self.assertIn("126.9", readme)
+        self.assertIn("125.45", readme)
+        self.assertNotIn("126.8", gui)
+        self.assertNotIn("126.8", readme)
+        self.assertNotIn("135.1", gui)
+        self.assertNotIn("135.1", readme)
 
 
 class IconPackagingTest(unittest.TestCase):

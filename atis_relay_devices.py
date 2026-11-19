@@ -115,7 +115,7 @@ def wav_peak_level(path):
     return min(1.0, peak / 32767.0)
 
 
-def test_capture(device, kind="sdr", freq="126.8", seconds=5, sample_rate=16000):
+def test_capture(device, kind="sdr", freq="126.9", seconds=5, sample_rate=16000):
     fd, path = tempfile.mkstemp(prefix="atis-relay-test-", suffix=".wav")
     os.close(fd)
     ok = False

@@ -161,7 +161,7 @@ class AtisRelayWindow(Gtk.Window):
         self.icao1.set_placeholder_text("KMYF")
         self.icao1.set_max_length(4)
         self.freq1 = Gtk.Entry()
-        self.freq1.set_placeholder_text("126.8")
+        self.freq1.set_placeholder_text("126.9")
         self.key1 = Gtk.Entry()
         self.key1.set_visibility(False)
         self.key1.set_placeholder_text("Station key")
@@ -172,7 +172,7 @@ class AtisRelayWindow(Gtk.Window):
         self.icao2.set_placeholder_text("KSEE")
         self.icao2.set_max_length(4)
         self.freq2 = Gtk.Entry()
-        self.freq2.set_placeholder_text("135.1")
+        self.freq2.set_placeholder_text("125.45")
         self.key2 = Gtk.Entry()
         self.key2.set_visibility(False)
         self.key2.set_placeholder_text("Optional")
@@ -469,7 +469,7 @@ class AtisRelayWindow(Gtk.Window):
         self.step2_note.set_text("Testing. You should hear a five second clip.")
         self.level.set_fraction(0.1)
         self.level.set_text("Testing")
-        freq = self.freq1.get_text().strip() or "126.8"
+        freq = self.freq1.get_text().strip() or "126.9"
 
         def work():
             ok, level, error = test_capture(item["id"], kind=item["kind"], freq=freq)
