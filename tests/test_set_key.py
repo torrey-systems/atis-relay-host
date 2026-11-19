@@ -170,6 +170,49 @@ class SetKeyTest(unittest.TestCase):
         self.assertIn("KMYF:126.9 token: set", output)
         self.assertIn("KSEE:125.45 token: set", output)
 
+    def test_set_key_with_faa_lid_alongside_icao(self):
+        with open(self.env_path, "w") as f:
+            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=\nSTATION_TOKENS=\nSTATIONS=KMYF:126.9,1g0:119.475\n")
+
+        other = "other-secret-station-token-abc"
+        stdout = io.StringIO()
+
+        with patch("os.geteuid", return_value=0):
+            code = pi_atc_cli.cmd_set_key(
+                ["set-key", "--icao", "1g0", other],
+                stdout=stdout,
+                restart_fn=self.restart,
+                path=self.env_path,
+            )
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertNotIn(other, output)
+        data = open(self.env_path).read()
+        self.assertIn("STATION_TOKENS=1G0:%s\n" % other, data)
+        self.assertNotIn("K1G0", data)
+        self.assertNotIn("STATION_TOKEN=%s\n" % other, data)
+
+        environ = {
+            "STATION_TOKEN": "",
+            "STATION_TOKENS": "KMYF:%s,1G0:%s" % (TOKEN, other),
+            "STATIONS": "KMYF:126.9,1G0:119.475",
+            "ATIS_RELAY_URL": "https://atisrelay.com",
+            "PI_ATC_ENV_FILE": self.env_path,
+            "PI_ATC_STATE_DIR": self.tmpdir.name,
+        }
+        stdout = io.StringIO()
+
+        with patch.dict(os.environ, environ, clear=False):
+            code = pi_atc_cli.cmd_status(stdout=stdout, environ=environ)
+
+        self.assertEqual(code, 0)
+        status = stdout.getvalue()
+        self.assertNotIn(TOKEN, status)
+        self.assertNotIn(other, status)
+        self.assertIn("KMYF:126.9 token: set", status)
+        self.assertIn("1G0:119.475 token: set", status)
+
 
 if __name__ == "__main__":
     unittest.main()

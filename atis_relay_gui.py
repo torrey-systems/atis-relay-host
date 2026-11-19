@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import re
 import threading
 
 import gi
@@ -23,14 +22,15 @@ from atis_relay_status import format_local_time, read_status, start_stop_enabled
 from pi_atc_config import (
     apply_runtime_paths,
     env_path,
+    normalize_airport_code,
     parse_stations,
     read_env_file,
     read_public_config,
     station_token_for,
+    valid_airport_code,
 )
 
-ICAO_RE = re.compile(r"^[A-Z0-9]{3,4}$")
-KEY_HINT = "Enter the airport code and ATIS frequency. Paste the station key ATIS Relay sent you. Leave airport 2 blank if you only have one."
+KEY_HINT = "Enter the airport code (for example KMYF or 1G0) and ATIS frequency. Paste the station key ATIS Relay sent you. Leave airport 2 blank if you only have one."
 KEY_MISSING_1 = "Paste the station key ATIS Relay sent you."
 KEY_MISSING_2 = "Paste the station key ATIS Relay sent you for airport 2."
 ICON_NAME = "atis-relay"
@@ -292,7 +292,7 @@ class AtisRelayWindow(Gtk.Window):
 
         for item in stations:
             if isinstance(item, (list, tuple)) and len(item) >= 2:
-                parsed.append((str(item[0]).strip().upper(), str(item[1]).strip()))
+                parsed.append((normalize_airport_code(item[0]), str(item[1]).strip()))
 
         if parsed:
             return {
@@ -319,7 +319,8 @@ class AtisRelayWindow(Gtk.Window):
 
         saved = self._saved_config()
         flags = saved.get("tokens") or {}
-        return bool(flags.get(icao) or flags.get(icao.upper()))
+        code = normalize_airport_code(icao)
+        return bool(flags.get(code) or flags.get(icao))
 
     def _load_saved(self):
         apply_runtime_paths()
@@ -334,10 +335,10 @@ class AtisRelayWindow(Gtk.Window):
             self.icao2.set_text(stations[1][0])
             self.freq2.set_text(stations[1][1])
 
-        if self._token_saved(self.icao1.get_text().strip().upper()):
+        if self._token_saved(self.icao1.get_text()):
             self.key1.set_placeholder_text("Key saved. Leave blank to keep it.")
 
-        if self._token_saved(self.icao2.get_text().strip().upper()):
+        if self._token_saved(self.icao2.get_text()):
             self.key2.set_placeholder_text("Key saved. Leave blank to keep it.")
 
         enabled = service_enabled_state()
@@ -346,14 +347,14 @@ class AtisRelayWindow(Gtk.Window):
         self._saved_kind = saved.get("capture_kind") or "sdr"
 
     def _stations_from_form(self):
-        icao1 = self.icao1.get_text().strip().upper()
+        icao1 = normalize_airport_code(self.icao1.get_text())
         freq1 = self.freq1.get_text().strip()
-        icao2 = self.icao2.get_text().strip().upper()
+        icao2 = normalize_airport_code(self.icao2.get_text())
         freq2 = self.freq2.get_text().strip()
         stations = []
 
-        if not ICAO_RE.match(icao1):
-            return None, "Enter a 3 or 4 letter airport code for airport 1."
+        if not valid_airport_code(icao1):
+            return None, "Enter a 3 or 4 character airport code for airport 1."
 
         if not _valid_freq(freq1):
             return None, "Enter a frequency between 118.0 and 136.99 for airport 1."
@@ -361,8 +362,8 @@ class AtisRelayWindow(Gtk.Window):
         stations.append((icao1, freq1))
 
         if icao2 or freq2:
-            if not ICAO_RE.match(icao2):
-                return None, "Enter a 3 or 4 letter airport code for airport 2, or leave it blank."
+            if not valid_airport_code(icao2):
+                return None, "Enter a 3 or 4 character airport code for airport 2, or leave it blank."
 
             if not _valid_freq(freq2):
                 return None, "Enter a frequency between 118.0 and 136.99 for airport 2."

@@ -48,7 +48,7 @@ The window looks like this when you add airports:
 
 ## 4. Add your airport and key
 
-1. Type the airport code (for example `KMYF`).
+1. Type the airport code (for example `KMYF` or `1G0`).
 2. Type the ATIS frequency in MHz (for example `126.9` for KMYF, or `125.45` for KSEE).
 3. Paste the station key ATIS Relay sent you. The field hides the key.
 4. A second airport is optional. Each airport needs its own key.
@@ -117,9 +117,9 @@ The `pi_setup/install.sh` script is only for baking a factory SD image. The desk
 
 Clips go to `https://atisrelay.com` with `Authorization: Bearer <token>`:
 
-- `POST /api/pi/{ICAO}/audio` (multipart `file` and `recorded_at`)
-- `POST /api/pi/{ICAO}/heartbeat`
-- `GET /api/pi/{ICAO}/commands` and `POST /api/pi/{ICAO}/commands/{id}/ack`
+- `POST /api/pi/{airport}/audio` (multipart `file` and `recorded_at`)
+- `POST /api/pi/{airport}/heartbeat`
+- `GET /api/pi/{airport}/commands` and `POST /api/pi/{airport}/commands/{id}/ack`
 
 ## Development
 

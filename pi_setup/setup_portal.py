@@ -7,7 +7,13 @@ from pathlib import Path
 from flask import Flask, request, redirect
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pi_atc_config import format_station_tokens, parse_station_tokens, parse_stations
+from pi_atc_config import (
+    format_station_tokens,
+    normalize_airport_code,
+    parse_station_tokens,
+    parse_stations,
+    valid_airport_code,
+)
 
 APP_DIR = Path("/opt/pi-atc")
 DEFAULT_ENV_PATH = Path("/etc/pi-atc/env")
@@ -63,7 +69,7 @@ button:hover{background:#2563eb}
     <input id="psk" name="psk" type="password" required>
 
     <label for="icao1">Station 1 &mdash; Airport Code</label>
-    <input id="icao1" name="icao1" required placeholder="KSAN" maxlength="4"
+    <input id="icao1" name="icao1" required placeholder="KMYF" maxlength="4"
       pattern="[A-Za-z0-9]{3,4}" value="{{ICAO1}}">
 
     <label for="freq1">Station 1 &mdash; Frequency (118.000 &ndash; 136.990 MHz)</label>
@@ -74,7 +80,7 @@ button:hover{background:#2563eb}
     <input id="station_key1" name="station_key1" type="password" autocomplete="off">
 
     <label for="icao2">Station 2 &mdash; Airport Code <span style="font-weight:400;text-transform:none">(optional)</span></label>
-    <input id="icao2" name="icao2" placeholder="KCRQ" maxlength="4"
+    <input id="icao2" name="icao2" placeholder="1G0" maxlength="4"
       pattern="[A-Za-z0-9]{3,4}" value="{{ICAO2}}">
 
     <label for="freq2">Station 2 &mdash; Frequency (118.000 &ndash; 136.990 MHz)</label>
@@ -225,9 +231,9 @@ def index():
 def submit():
     ssid = request.form.get("ssid", "").strip()
     psk = request.form.get("psk", "").strip()
-    icao1 = request.form.get("icao1", "").strip().upper()
+    icao1 = normalize_airport_code(request.form.get("icao1", ""))
     freq1 = request.form.get("freq1", "").strip()
-    icao2 = request.form.get("icao2", "").strip().upper()
+    icao2 = normalize_airport_code(request.form.get("icao2", ""))
     freq2 = request.form.get("freq2", "").strip()
     station_key1 = request.form.get("station_key1", "").strip()
     station_key2 = request.form.get("station_key2", "").strip()
@@ -236,7 +242,7 @@ def submit():
     if not ssid or not psk:
         return render_form("WiFi network and password are required.", **fields)
 
-    if not re.match(r"^[A-Z0-9]{3,4}$", icao1):
+    if not valid_airport_code(icao1):
         return render_form("Station 1: enter a valid 3- or 4-character airport code.", **fields)
 
     if not validate_freq(freq1):
@@ -245,8 +251,8 @@ def submit():
     stations = [(icao1, freq1)]
 
     if icao2 or freq2:
-        if not re.match(r"^[A-Z0-9]{3,4}$", icao2):
-            return render_form("Station 2: enter a valid 4-character ICAO code.", **fields)
+        if not valid_airport_code(icao2):
+            return render_form("Station 2: enter a valid 3- or 4-character airport code.", **fields)
 
         if not validate_freq(freq2):
             return render_form("Station 2: enter a frequency between 118.00 and 136.99 MHz.", **fields)

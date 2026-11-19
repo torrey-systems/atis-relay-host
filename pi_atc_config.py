@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import stat
 import sys
 
 from dotenv import load_dotenv
+
+AIRPORT_CODE_RE = re.compile(r"^[A-Z0-9]{3,4}$")
 
 DEFAULT_ENV_PATH = "/etc/pi-atc/env"
 SYSTEM_ENV_PATH = "/etc/atis-relay/env"
@@ -103,6 +106,22 @@ def load_config():
             load_dotenv(path, override=False)
 
 
+def normalize_airport_code(value):
+    if value is None:
+        return ""
+
+    return str(value).strip().upper()
+
+
+def valid_airport_code(value):
+    code = normalize_airport_code(value)
+
+    if not code:
+        return False
+
+    return AIRPORT_CODE_RE.match(code) is not None
+
+
 def parse_stations(raw):
     stations = []
 
@@ -116,7 +135,7 @@ def parse_stations(raw):
             continue
 
         icao, freq = entry.split(":", 1)
-        stations.append((icao.strip().upper(), freq.strip()))
+        stations.append((normalize_airport_code(icao), freq.strip()))
 
     return stations
 
@@ -153,7 +172,7 @@ def parse_station_tokens(raw):
             continue
 
         icao, token = entry.split(":", 1)
-        icao = icao.strip().upper()
+        icao = normalize_airport_code(icao)
         token = token.strip()
 
         if icao and token:
@@ -195,7 +214,7 @@ def station_token_for(icao, environ=None):
     if not icao:
         return ""
 
-    return token_map_from_env(environ).get(str(icao).strip().upper(), "")
+    return token_map_from_env(environ).get(normalize_airport_code(icao), "")
 
 
 def set_station_token(path, token, icao=None):
@@ -205,7 +224,7 @@ def set_station_token(path, token, icao=None):
     tokens = parse_station_tokens(data.get("STATION_TOKENS", ""))
 
     if icao:
-        icao = icao.strip().upper()
+        icao = normalize_airport_code(icao)
 
         if not icao:
             return "icao is required"
@@ -248,13 +267,20 @@ def save_desktop_settings(path, stations, tokens, audio_device="", capture_kind=
     if "ATIS_RELAY_URL" not in data or data.get("ATIS_RELAY_URL") == "":
         data["ATIS_RELAY_URL"] = DEFAULT_ATIS_RELAY_URL
 
+    stations = [
+        (normalize_airport_code(icao), freq)
+        for icao, freq in stations
+    ]
     data["STATIONS"] = ",".join("%s:%s" % (icao, freq) for icao, freq in stations)
+
     incoming = dict(tokens or {})
     existing = parse_station_tokens(data.get("STATION_TOKENS", ""))
 
     for icao, token in incoming.items():
-        if token:
-            existing[icao] = token
+        code = normalize_airport_code(icao)
+
+        if token and code:
+            existing[code] = token
 
     keep = {icao for icao, _freq in stations}
 
