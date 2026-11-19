@@ -77,6 +77,14 @@ jobs:
           test -f /usr/share/applications/atis-relay.desktop
           grep -q '^Name=ATIS Relay' /usr/share/applications/atis-relay.desktop
           test -f /usr/share/icons/hicolor/scalable/apps/atis-relay.svg
+          test -f /usr/share/icons/hicolor/16x16/apps/atis-relay.png
+          test -f /usr/share/icons/hicolor/32x32/apps/atis-relay.png
+          test -f /usr/share/icons/hicolor/48x48/apps/atis-relay.png
+          test -f /usr/share/icons/hicolor/64x64/apps/atis-relay.png
+          test -f /usr/share/icons/hicolor/128x128/apps/atis-relay.png
+          test -f /usr/share/icons/hicolor/256x256/apps/atis-relay.png
+          test -f /usr/share/icons/hicolor/512x512/apps/atis-relay.png
+          grep -q '^Icon=atis-relay$' /usr/share/applications/atis-relay.desktop
           test -f /lib/systemd/system/atis-relay.service
           grep -q '^User=atis-relay$' /lib/systemd/system/atis-relay.service
           grep -q '^Restart=always$' /lib/systemd/system/atis-relay.service

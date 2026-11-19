@@ -66,8 +66,8 @@ contents:
       mode: 0755
   - src: packaging/atis-relay.desktop
     dst: /usr/share/applications/atis-relay.desktop
-  - src: packaging/atis-relay.svg
-    dst: /usr/share/icons/hicolor/scalable/apps/atis-relay.svg
+  - src: packaging/icons/hicolor
+    dst: /usr/share/icons/hicolor
   - src: packaging/atis-relay.service
     dst: /lib/systemd/system/atis-relay.service
   - src: packaging/com.atisrelay.host.policy

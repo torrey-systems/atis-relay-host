@@ -1,6 +1,6 @@
 atis-relay-host (0.2.0) unstable; urgency=medium
 
-  * Desktop app for Raspberry Pi OS. Menu launcher, system recorder service at boot, no WiFi takeover.
+  * Desktop app for Raspberry Pi OS. Official logo, system recorder service at boot, no WiFi takeover.
 
  -- Torrey Systems <deploy@atisrelay.com>  Thu, 19 Nov 2026 00:10:00 +0000
 

@@ -32,6 +32,41 @@ ICAO_RE = re.compile(r"^[A-Z0-9]{3,4}$")
 KEY_HINT = "Enter the airport code and ATIS frequency. Paste the station key ATIS Relay sent you. Leave airport 2 blank if you only have one."
 KEY_MISSING_1 = "Paste the station key ATIS Relay sent you."
 KEY_MISSING_2 = "Paste the station key ATIS Relay sent you for airport 2."
+ICON_NAME = "atis-relay"
+
+
+def icon_file(size="256x256"):
+    filename = "atis-relay.svg" if size == "scalable" else "atis-relay.png"
+    rel = os.path.join(size, "apps", filename)
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = (
+        os.path.join("/usr/share/icons/hicolor", rel),
+        os.path.join(here, "packaging", "icons", "hicolor", rel),
+        os.path.join(os.path.dirname(here), "packaging", "icons", "hicolor", rel),
+    )
+
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+
+    return ""
+
+
+def apply_app_icon(window=None):
+    Gtk.Window.set_default_icon_name(ICON_NAME)
+    path = icon_file("256x256") or icon_file("128x128") or icon_file("64x64")
+
+    if not path:
+        return
+
+    try:
+        Gtk.Window.set_default_icon_from_file(path)
+
+        if window is not None:
+            window.set_icon_from_file(path)
+
+    except Exception:
+        return
 
 
 def _valid_freq(text):
@@ -52,16 +87,27 @@ class AtisRelayWindow(Gtk.Window):
         self.connect("destroy", lambda *_a: Gtk.main_quit() if Gtk.main_level() else None)
         self.devices = []
         self.poll_id = None
+        apply_app_icon(self)
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         self.add(outer)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        logo_path = icon_file("128x128") or icon_file("64x64") or icon_file("48x48")
+
+        if logo_path:
+            logo = Gtk.Image.new_from_file(logo_path)
+            header.pack_start(logo, False, False, 0)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         title = Gtk.Label(label="ATIS Relay")
         title.get_style_context().add_class("title")
         title.set_xalign(0)
         subtitle = Gtk.Label(label="Record ATIS audio and send it to ATIS Relay.")
         subtitle.set_xalign(0)
         subtitle.set_line_wrap(True)
-        outer.pack_start(title, False, False, 0)
-        outer.pack_start(subtitle, False, False, 0)
+        text.pack_start(title, False, False, 0)
+        text.pack_start(subtitle, False, False, 0)
+        header.pack_start(text, True, True, 0)
+        outer.pack_start(header, False, False, 0)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         outer.pack_start(self.stack, True, True, 0)

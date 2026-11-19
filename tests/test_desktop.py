@@ -237,6 +237,29 @@ class WordingTest(unittest.TestCase):
         self.assertNotIn("Paste the station key from atisrelay.com", gui)
         self.assertNotIn("Paste the station key from atisrelay.com", readme)
         self.assertNotIn("~/.config/atis-relay", readme)
+        self.assertNotIn("\u2014", readme)
+        self.assertIn("docs/images/logo.png", readme)
+
+
+class IconPackagingTest(unittest.TestCase):
+    def test_hicolor_sizes_exist_and_old_icon_is_gone(self):
+        self.assertFalse(os.path.isfile(os.path.join(ROOT, "packaging", "atis-relay.svg")))
+        scalable = os.path.join(ROOT, "packaging", "icons", "hicolor", "scalable", "apps", "atis-relay.svg")
+        self.assertTrue(os.path.isfile(scalable))
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, "docs", "images", "logo.png")))
+
+        for size in (16, 32, 48, 64, 128, 256, 512):
+            path = os.path.join(
+                ROOT,
+                "packaging",
+                "icons",
+                "hicolor",
+                "%sx%s" % (size, size),
+                "apps",
+                "atis-relay.png",
+            )
+            self.assertTrue(os.path.isfile(path), path)
+            self.assertGreater(os.path.getsize(path), 100)
 
 
 if __name__ == "__main__":

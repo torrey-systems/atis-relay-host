@@ -3,7 +3,7 @@ set -e
 
 case "$1" in
   purge)
-    rm -rf /etc/pi-atc /var/lib/pi-atc /etc/atis-relay /var/lib/atis-relay
+    rm -rf /etc/pi-atc /var/lib/pi-atc /etc/atis-relay /var/lib/atis-relay /opt/pi-atc
     rm -f /etc/NetworkManager/conf.d/wifi-powersave-off.conf
     rm -f /etc/systemd/journald.conf.d/pi-atc.conf
 
@@ -16,6 +16,9 @@ case "$1" in
     fi
     ;;
   remove)
+    rm -rf /opt/pi-atc/__pycache__
+    rmdir /opt/pi-atc >/dev/null 2>&1 || true
+
     if command -v systemctl >/dev/null 2>&1; then
       systemctl daemon-reload >/dev/null 2>&1 || true
     fi
