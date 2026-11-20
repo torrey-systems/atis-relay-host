@@ -49,7 +49,7 @@ class ConfigMigrationTest(unittest.TestCase):
         self.assertEqual(dest["PI_ID"], "nkx-relay")
         self.assertEqual(dest["STATION_TOKEN"], TOKEN)
         self.assertEqual(dest["AWS_SECRET_ACCESS_KEY"], SECRET)
-        self.assertEqual(stat.S_IMODE(os.stat(self.dest).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.stat(self.dest).st_mode), 0o640)
 
     def test_does_not_overwrite_existing_values(self):
         with open(self.legacy, "w") as f:
