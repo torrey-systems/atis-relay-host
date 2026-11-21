@@ -1,0 +1,49 @@
+#!/bin/sh
+set -e
+
+REPO="https://github.com/osmocom/rtl-sdr"
+TAG="v2.0.2"
+COMMIT="619ac3186ea0ffc092615e1f59f7397e5e6f668c"
+PREFIX="/opt/pi-atc/rtl-sdr"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "root is required" >&2
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  build-essential \
+  ca-certificates \
+  cmake \
+  git \
+  libusb-1.0-0-dev \
+  pkg-config
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+git clone --quiet --depth 1 --branch "$TAG" "$REPO" "$WORK/src"
+
+if [ "$(git -C "$WORK/src" rev-parse HEAD)" != "$COMMIT" ]; then
+  echo "rtl-sdr source does not match the expected release" >&2
+  exit 1
+fi
+
+cmake -S "$WORK/src" -B "$WORK/build" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DCMAKE_INSTALL_LIBDIR=lib \
+  -DCMAKE_INSTALL_RPATH="$PREFIX/lib" \
+  -DDETACH_KERNEL_DRIVER=ON
+cmake --build "$WORK/build"
+rm -rf "$PREFIX"
+
+if ! cmake --install "$WORK/build" || ! "$PREFIX/bin/rtl_fm" -h 2>&1 | grep -q "rtl_fm"; then
+  rm -rf "$PREFIX"
+  echo "rtl_fm did not install correctly" >&2
+  exit 1
+fi
+
+echo "installed RTL-SDR Blog V4 driver in $PREFIX"

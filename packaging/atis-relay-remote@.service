@@ -1,0 +1,8 @@
+[Unit]
+Description=ATIS Relay remote command (%i)
+
+[Service]
+Type=oneshot
+Environment=PI_ATC_ENV_FILE=/etc/atis-relay/env
+Environment=PI_ATC_STATE_DIR=/var/lib/atis-relay
+ExecStart=/usr/lib/atis-relay/atis-relay-ctl remote %i

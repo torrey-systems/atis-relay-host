@@ -7,6 +7,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from atis_relay_devices import usb_root_hubs
 from pi_atc_config import (
     atis_relay_url,
     load_config,
@@ -35,6 +36,17 @@ COMMAND_PREFIX = "pi-commands/"
 SCHEMA_VERSION = 1
 RTL_VENDOR = "0bda"
 RTL_PRODUCTS = {"2832", "2836", "2838"}
+DEFAULT_CAPTURE_UNIT = "pi-atc.service"
+REMOTE_COMMANDS_OFF = "remote commands are turned off on this Pi"
+
+
+def capture_unit():
+    override = os.environ.get("PI_ATC_CAPTURE_UNIT")
+
+    if isinstance(override, str) and override.strip():
+        return override.strip()
+
+    return DEFAULT_CAPTURE_UNIT
 
 
 def _run(args, timeout=5):
@@ -229,7 +241,10 @@ def rtl_sdr_present():
     return False
 
 
-def read_service_state(name="pi-atc.service"):
+def read_service_state(name=None):
+    if name is None:
+        name = capture_unit()
+
     res = _run(
         ["systemctl", "show", "-p", "ActiveState", "-p", "SubState", "--value", name],
         timeout=3,
@@ -384,7 +399,7 @@ def reset_usb():
     unbind = "/sys/bus/usb/drivers/usb/unbind"
     bind = "/sys/bus/usb/drivers/usb/bind"
 
-    for hub in ("usb1", "usb2"):
+    for hub in usb_root_hubs():
         try:
             with open(unbind, "w") as f:
                 f.write(hub)
@@ -464,7 +479,16 @@ def heartbeat_payload_from_status(status):
     return {key: value for key, value in payload.items() if value is not None or key == "last_error"}
 
 
-def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_fn=None):
+def run_http_checkin(
+    reboot_fn=None,
+    now=None,
+    pi_id=None,
+    session=None,
+    sleep_fn=None,
+    permit_fn=None,
+    restart_fn=None,
+    usb_reset_fn=None,
+):
     from pi_atc_http import (
         AuthRejected,
         ClientError,
@@ -483,6 +507,12 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
 
     if reboot_fn is None:
         reboot_fn = default_reboot
+
+    if restart_fn is None:
+        restart_fn = restart_capture
+
+    if usb_reset_fn is None:
+        usb_reset_fn = reset_usb
 
     status = collect_status(now=now, pi_id=pi_id)
     base_url = atis_relay_url()
@@ -565,16 +595,29 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
             ok = True
             result_text = action
 
-            if action == "restart_capture":
-                ok = restart_capture()
+            if permit_fn is not None and not permit_fn(action):
+                ok = False
+                result_text = REMOTE_COMMANDS_OFF
+
+            elif action == "restart_capture":
+                ok = restart_fn()
                 result_text = "restarted" if ok else "restart failed"
 
             elif action == "usb_reset":
-                ok = reset_usb()
+                ok = usb_reset_fn()
                 result_text = "usb reset" if ok else "usb reset failed"
 
             elif action == "reboot":
                 result_text = "rebooting"
+
+            last = persist_command_result({
+                "id": ident,
+                "action": action,
+                "decision": "execute" if ok else "ignore",
+                "reason": result_text,
+            }, now=now)
+            last_id = ident
+            status["last_command"] = last
 
             try:
                 ack_command(
@@ -590,15 +633,6 @@ def run_http_checkin(reboot_fn=None, now=None, pi_id=None, session=None, sleep_f
 
             except (AuthRejected, Forbidden, TransientError, ClientError) as exc:
                 print("[heartbeat] command ack failed for %s: %s" % (icao, exc))
-
-            last = persist_command_result({
-                "id": ident,
-                "action": action,
-                "decision": "execute" if ok else "ignore",
-                "reason": result_text,
-            }, now=now)
-            last_id = ident
-            status["last_command"] = last
 
             if action == "reboot" and ok:
                 reboot_after = ident
@@ -716,7 +750,15 @@ def run_s3_checkin(s3_client=None, reboot_fn=None, now=None, pi_id=None):
     return status
 
 
-def run_checkin(s3_client=None, reboot_fn=None, now=None, pi_id=None):
+def run_checkin(
+    s3_client=None,
+    reboot_fn=None,
+    now=None,
+    pi_id=None,
+    permit_fn=None,
+    restart_fn=None,
+    usb_reset_fn=None,
+):
     load_config()
 
     if s3_client is not None:
@@ -730,7 +772,14 @@ def run_checkin(s3_client=None, reboot_fn=None, now=None, pi_id=None):
     mode = upload_mode()
 
     if mode == "http":
-        return run_http_checkin(reboot_fn=reboot_fn, now=now, pi_id=pi_id)
+        return run_http_checkin(
+            reboot_fn=reboot_fn,
+            now=now,
+            pi_id=pi_id,
+            permit_fn=permit_fn,
+            restart_fn=restart_fn,
+            usb_reset_fn=usb_reset_fn,
+        )
 
     if mode == "s3":
         return run_s3_checkin(reboot_fn=reboot_fn, now=now, pi_id=pi_id)

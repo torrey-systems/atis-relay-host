@@ -5,3 +5,18 @@ polkit.addRule(function(action, subject) {
         return polkit.Result.YES;
     }
 });
+
+polkit.addRule(function(action, subject) {
+    var units = [
+        "atis-relay-remote@reboot.service",
+        "atis-relay-remote@restart_capture.service",
+        "atis-relay-remote@usb_reset.service"
+    ];
+
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "atis-relay" &&
+        action.lookup("verb") == "start" &&
+        units.indexOf(action.lookup("unit")) >= 0) {
+        return polkit.Result.YES;
+    }
+});

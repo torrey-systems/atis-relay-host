@@ -5,8 +5,10 @@ import stat
 import subprocess
 import sys
 
+from atis_relay_devices import reset_rtl_sdr
 from atis_relay_status import write_status
 from pi_atc_config import (
+    REMOTE_ACTIONS,
     SYSTEM_ENV_PATH,
     SYSTEM_STATE_DIR,
     apply_runtime_paths,
@@ -14,7 +16,9 @@ from pi_atc_config import (
     parse_stations,
     parse_station_tokens,
     read_env_file,
+    remote_commands_enabled,
     save_desktop_settings,
+    set_env_value,
     write_public_config,
 )
 
@@ -22,6 +26,8 @@ UNIT_NAME = "atis-relay.service"
 SYSTEMCTL_VERBS = ("start", "stop", "restart", "enable", "disable", "is-active", "is-enabled")
 PRIV_VERBS = ("start", "stop", "restart", "enable", "disable")
 ALLOWED_ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+REMOTE_RESTART_DELAY_SEC = 15
+V4_DRIVER_INSTALLER = "/usr/lib/atis-relay/install-v4-driver"
 
 
 def _as_root():
@@ -175,10 +181,114 @@ def cmd_public_config():
     return 0
 
 
+def cmd_remote_commands(value):
+    if value not in ("on", "off"):
+        print("remote-commands requires on or off", file=sys.stderr)
+        return 2
+
+    if not _require_root():
+        return 1
+
+    dest = env_path()
+    set_env_value(dest, "REMOTE_COMMANDS", "1" if value == "on" else "0")
+    write_public_config(read_env_file(dest))
+    return 0
+
+
+def _trusted_env_file(path):
+    try:
+        st = os.lstat(path)
+
+    except OSError:
+        return False
+
+    if not stat.S_ISREG(st.st_mode):
+        return False
+
+    if st.st_uid != 0:
+        return False
+
+    return not st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+
+
+def _remote_commands_allowed():
+    path = env_path()
+
+    if not _trusted_env_file(path):
+        return False
+
+    return remote_commands_enabled(read_env_file(path))
+
+
+def _run_quiet(args):
+    try:
+        res = subprocess.run(args, capture_output=True, text=True, check=False)
+
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if res.returncode != 0 and res.stderr:
+        sys.stderr.write(res.stderr)
+
+    return res.returncode
+
+
+def cmd_remote(action):
+    if action not in REMOTE_ACTIONS:
+        print("unknown remote command", file=sys.stderr)
+        return 2
+
+    if not _require_root():
+        return 1
+
+    if not _remote_commands_allowed():
+        print("remote commands are turned off", file=sys.stderr)
+        return 1
+
+    if action == "reboot":
+        return _run_quiet(["systemctl", "--no-block", "reboot"])
+
+    if action == "restart_capture":
+        return _run_quiet([
+            "systemd-run",
+            "--quiet",
+            "--collect",
+            "--on-active=%d" % REMOTE_RESTART_DELAY_SEC,
+            "--timer-property=AccuracySec=1s",
+            "systemctl",
+            "restart",
+            UNIT_NAME,
+        ])
+
+    if reset_rtl_sdr():
+        return 0
+
+    print("no USB radio could be reset", file=sys.stderr)
+    return 1
+
+
+def cmd_install_v4_driver():
+    if not _require_root():
+        return 1
+
+    try:
+        res = subprocess.run([V4_DRIVER_INSTALLER], check=False)
+
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    return res.returncode
+
+
 def usage(stdout):
     print("usage: atis-relay-ctl start|stop|restart|enable|disable|is-active|is-enabled", file=stdout)
     print("       atis-relay-ctl install-config FILE", file=stdout)
     print("       atis-relay-ctl public-config", file=stdout)
+    print("       atis-relay-ctl remote-commands on|off", file=stdout)
+    print("       atis-relay-ctl remote reboot|restart_capture|usb_reset", file=stdout)
+    print("       atis-relay-ctl install-v4-driver", file=stdout)
 
 
 def main(argv=None):
@@ -205,6 +315,23 @@ def main(argv=None):
 
     if action == "public-config":
         return cmd_public_config()
+
+    if action == "remote-commands":
+        if len(argv) < 2:
+            print("remote-commands requires on or off", file=sys.stderr)
+            return 2
+
+        return cmd_remote_commands(argv[1])
+
+    if action == "remote":
+        if len(argv) < 2:
+            print("remote requires a command", file=sys.stderr)
+            return 2
+
+        return cmd_remote(argv[1])
+
+    if action == "install-v4-driver":
+        return cmd_install_v4_driver()
 
     usage(sys.stderr)
     return 2

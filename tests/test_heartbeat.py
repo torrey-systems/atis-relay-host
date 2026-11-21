@@ -5,6 +5,7 @@ import socket
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import mock_open, patch
 
 import heartbeat
 import pi_atc_state as state
@@ -178,6 +179,42 @@ class HeartbeatTest(unittest.TestCase):
         self.assertEqual(payload["uptime_seconds"], 12)
         self.assertEqual(payload["capture_status"], "running")
         self.assertIsNone(payload["last_error"])
+
+    def test_capture_unit_defaults_to_factory_unit(self):
+        with patch.dict(os.environ):
+            os.environ.pop("PI_ATC_CAPTURE_UNIT", None)
+            self.assertEqual(heartbeat.capture_unit(), "pi-atc.service")
+
+    def test_service_state_follows_capture_unit(self):
+        calls = []
+
+        class Result:
+            returncode = 0
+            stdout = "active\nrunning\n"
+
+        def fake_run(args, timeout=5):
+            calls.append(list(args))
+            return Result()
+
+        with patch.dict(os.environ, {"PI_ATC_CAPTURE_UNIT": "atis-relay.service"}):
+            with patch.object(heartbeat, "_run", side_effect=fake_run):
+                service = heartbeat.read_service_state()
+
+        self.assertEqual(calls[0][-1], "atis-relay.service")
+        self.assertEqual(service, {"active": "active", "sub": "running"})
+        payload = heartbeat.heartbeat_payload_from_status({"pi_atc_service": service})
+        self.assertEqual(payload["capture_status"], "running")
+
+    def test_usb_reset_covers_every_root_hub(self):
+        opener = mock_open()
+
+        with patch.object(heartbeat, "usb_root_hubs", return_value=["usb1", "usb2", "usb3", "usb4"]):
+            with patch.object(heartbeat, "open", opener, create=True):
+                with patch.object(heartbeat.time, "sleep"):
+                    self.assertTrue(heartbeat.reset_usb())
+
+        written = [call.args[0] for call in opener.return_value.write.call_args_list]
+        self.assertEqual(written, ["usb1", "usb1", "usb2", "usb2", "usb3", "usb3", "usb4", "usb4"])
 
 
 if __name__ == "__main__":

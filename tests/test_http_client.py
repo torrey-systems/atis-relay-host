@@ -387,6 +387,189 @@ class HeartbeatHttpTest(unittest.TestCase):
         self.assertEqual(status["last_command"]["id"], "KMYF:15")
         self.assertEqual(session.calls[2]["json"]["result"], "rebooting")
 
+    def _command_session(self, action, cmd_id=21):
+        return FakeSession([
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": [{"id": cmd_id, "command": action}]}),
+            FakeResponse(200, {"ok": True, "status": "acked"}),
+        ])
+
+    def test_refused_reboot_is_acked_as_failed_and_does_not_reboot(self):
+        import heartbeat
+
+        asked = []
+        session = self._command_session("reboot")
+        status = heartbeat.run_http_checkin(
+            reboot_fn=lambda: self.reboots.append("nope"),
+            session=session,
+            sleep_fn=lambda _s: None,
+            pi_id="test-pi",
+            permit_fn=lambda action: asked.append(action) or False,
+        )
+        self.assertEqual(asked, ["reboot"])
+        self.assertEqual(self.reboots, [])
+        self.assertEqual(session.calls[2]["url"], "https://atisrelay.com/api/pi/KMYF/commands/21/ack")
+        self.assertEqual(session.calls[2]["json"], {
+            "ok": False,
+            "result": "remote commands are turned off on this Pi",
+        })
+        self.assertEqual(status["last_command"]["id"], "KMYF:21")
+        self.assertEqual(status["last_command"]["result"], "ignore")
+
+    def _desktop_checkin(self, action, remote_commands, cmd_id=21):
+        import atis_relay_status
+        import atis_relay_worker
+        import heartbeat
+        from unittest.mock import patch
+
+        session = self._command_session(action, cmd_id)
+
+        with patch.dict(os.environ, {"REMOTE_COMMANDS": remote_commands}):
+            with patch.object(atis_relay_worker, "run_remote_command", return_value=True) as run_remote_command:
+                heartbeat.run_http_checkin(
+                    reboot_fn=atis_relay_worker._desktop_reboot,
+                    session=session,
+                    sleep_fn=lambda _s: None,
+                    pi_id="test-pi",
+                    permit_fn=atis_relay_worker._remote_permitted,
+                    restart_fn=atis_relay_worker._desktop_restart_capture,
+                    usb_reset_fn=atis_relay_worker._desktop_usb_reset,
+                )
+
+        ran = [call.args[0] for call in run_remote_command.call_args_list]
+        return session.calls[2]["json"], ran, atis_relay_status.read_notice()
+
+    def test_desktop_restart_request_while_turned_off_leaves_a_warning(self):
+        ack, ran, notice = self._desktop_checkin("reboot", "0")
+        self.assertEqual(ack["ok"], False)
+        self.assertEqual(ran, [])
+        self.assertEqual(notice["message"], "ATIS Relay asked this Pi to restart.")
+        self.assertIn("Raspberry Pi menu", notice["fix"])
+
+    def test_desktop_requests_while_turned_on_run_without_a_warning(self):
+        for cmd_id, action in enumerate(("reboot", "restart_capture", "usb_reset"), start=21):
+            with self.subTest(action=action):
+                ack, ran, notice = self._desktop_checkin(action, "1", cmd_id)
+                self.assertEqual(ack["ok"], True)
+                self.assertEqual(ran, [action])
+                self.assertEqual(notice["message"], "")
+
+    def test_refused_command_is_not_asked_about_twice(self):
+        import heartbeat
+
+        asked = []
+
+        for _attempt in range(2):
+            heartbeat.run_http_checkin(
+                reboot_fn=lambda: self.reboots.append("nope"),
+                session=self._command_session("reboot"),
+                sleep_fn=lambda _s: None,
+                pi_id="test-pi",
+                permit_fn=lambda action: asked.append(action) or False,
+            )
+
+        self.assertEqual(asked, ["reboot"])
+
+    def test_refused_restart_and_usb_reset_do_not_run(self):
+        import heartbeat
+
+        ran = []
+
+        for cmd_id, action in enumerate(("restart_capture", "usb_reset"), start=21):
+            session = self._command_session(action, cmd_id)
+            heartbeat.run_http_checkin(
+                reboot_fn=lambda: self.reboots.append("nope"),
+                session=session,
+                sleep_fn=lambda _s: None,
+                pi_id="test-pi",
+                permit_fn=lambda _action: False,
+                restart_fn=lambda: ran.append("restart") or True,
+                usb_reset_fn=lambda: ran.append("usb") or True,
+            )
+            self.assertEqual(session.calls[2]["json"]["ok"], False)
+
+        self.assertEqual(ran, [])
+
+    def test_permitted_commands_use_the_given_handlers(self):
+        import heartbeat
+
+        ran = []
+        expected = {"restart_capture": "restarted", "usb_reset": "usb reset"}
+
+        for cmd_id, (action, result) in enumerate(expected.items(), start=21):
+            session = self._command_session(action, cmd_id)
+            heartbeat.run_http_checkin(
+                reboot_fn=lambda: self.reboots.append("nope"),
+                session=session,
+                sleep_fn=lambda _s: None,
+                pi_id="test-pi",
+                permit_fn=lambda _action: True,
+                restart_fn=lambda: ran.append("restart") or True,
+                usb_reset_fn=lambda: ran.append("usb") or True,
+            )
+            self.assertEqual(session.calls[2]["json"], {"ok": True, "result": result})
+
+        self.assertEqual(ran, ["restart", "usb"])
+        self.assertEqual(self.reboots, [])
+
+    def test_permitted_reboot_still_acks_then_reboots(self):
+        import heartbeat
+
+        session = self._command_session("reboot")
+        heartbeat.run_http_checkin(
+            reboot_fn=lambda: self.reboots.append(len(session.calls)),
+            session=session,
+            sleep_fn=lambda _s: None,
+            pi_id="test-pi",
+            permit_fn=lambda _action: True,
+        )
+        self.assertEqual(self.reboots, [3])
+        self.assertEqual(session.calls[2]["json"], {"ok": True, "result": "rebooting"})
+
+    def test_command_is_remembered_before_the_reply_is_sent(self):
+        import heartbeat
+        import pi_atc_state
+
+        remembered = []
+
+        class RecordingSession(FakeSession):
+            def request(self, method, url, timeout=None, **kwargs):
+                if url.endswith("/ack"):
+                    remembered.append((pi_atc_state.read_last_command() or {}).get("id"))
+
+                return super().request(method, url, timeout=timeout, **kwargs)
+
+        session = RecordingSession([
+            FakeResponse(200, {"ok": True}),
+            FakeResponse(200, {"commands": [{"id": 21, "command": "restart_capture"}]}),
+            FakeResponse(200, {"ok": True, "status": "acked"}),
+        ])
+        heartbeat.run_http_checkin(
+            reboot_fn=lambda: self.reboots.append("nope"),
+            session=session,
+            sleep_fn=lambda _s: None,
+            pi_id="test-pi",
+            restart_fn=lambda: True,
+        )
+        self.assertEqual(remembered, ["KMYF:21"])
+
+    def test_factory_handlers_are_used_when_none_are_given(self):
+        import heartbeat
+        from unittest.mock import patch
+
+        with patch.object(heartbeat, "restart_capture", return_value=True) as restart_capture:
+            with patch.object(heartbeat, "reset_usb", return_value=True) as reset_usb:
+                for cmd_id, action in enumerate(("restart_capture", "usb_reset"), start=21):
+                    heartbeat.run_http_checkin(
+                        reboot_fn=lambda: self.reboots.append("nope"),
+                        session=self._command_session(action, cmd_id),
+                        sleep_fn=lambda _s: None,
+                        pi_id="test-pi",
+                    )
+
+        restart_capture.assert_called_once_with()
+        reset_usb.assert_called_once_with()
+
     def test_http_401_stops_without_reboot(self):
         import heartbeat
 

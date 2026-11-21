@@ -64,12 +64,18 @@ contents:
     dst: /usr/lib/atis-relay/atis-relay-ctl
     file_info:
       mode: 0755
+  - src: packaging/install-v4-driver
+    dst: /usr/lib/atis-relay/install-v4-driver
+    file_info:
+      mode: 0755
   - src: packaging/atis-relay.desktop
     dst: /usr/share/applications/atis-relay.desktop
   - src: packaging/icons/hicolor
     dst: /usr/share/icons/hicolor
   - src: packaging/atis-relay.service
     dst: /lib/systemd/system/atis-relay.service
+  - src: packaging/atis-relay-remote@.service
+    dst: /lib/systemd/system/atis-relay-remote@.service
   - src: packaging/com.atisrelay.host.policy
     dst: /usr/share/polkit-1/actions/com.atisrelay.host.policy
   - src: packaging/10-com.atisrelay.host.rules

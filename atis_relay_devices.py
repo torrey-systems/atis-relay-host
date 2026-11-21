@@ -1,12 +1,34 @@
 #!/usr/bin/env python3
+import fcntl
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import wave
 
 RTL_VENDOR = "0bda"
 RTL_PRODUCTS = {"2832", "2836", "2838"}
+USB_DEVICES_DIR = "/sys/bus/usb/devices"
+USB_NODES_DIR = "/dev/bus/usb"
+USB_ROOT_HUB_RE = re.compile(r"^usb(\d+)$")
+USBDEVFS_RESET = 0x5514
+V4_MANUFACTURER = "RTLSDRBlog"
+V4_PRODUCT = "Blog V4"
+V4_DRIVER_MARK = b"Blog V4"
+PRIVATE_RTL_DIR = "/opt/pi-atc/rtl-sdr"
+LIBRTLSDR_RE = re.compile(r"librtlsdr\S*\s+=>\s+(\S+)")
+
+
+def usb_root_hubs(root=USB_DEVICES_DIR):
+    try:
+        names = os.listdir(root)
+
+    except OSError:
+        return []
+
+    hubs = [name for name in names if USB_ROOT_HUB_RE.match(name)]
+    return sorted(hubs, key=lambda name: int(USB_ROOT_HUB_RE.match(name).group(1)))
 
 
 def _run(args, timeout=8):
@@ -21,6 +43,126 @@ def _run(args, timeout=8):
 
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+
+    except OSError:
+        return ""
+
+
+def rtl_sdr_devices(root=USB_DEVICES_DIR):
+    found = []
+
+    try:
+        names = sorted(os.listdir(root))
+
+    except OSError:
+        return found
+
+    for name in names:
+        base = os.path.join(root, name)
+        vendor = _read_text(os.path.join(base, "idVendor")).lower()
+        product = _read_text(os.path.join(base, "idProduct")).lower()
+
+        if vendor != RTL_VENDOR or product not in RTL_PRODUCTS:
+            continue
+
+        found.append({
+            "name": name,
+            "manufacturer": _read_text(os.path.join(base, "manufacturer")),
+            "product": _read_text(os.path.join(base, "product")),
+            "busnum": _read_text(os.path.join(base, "busnum")),
+            "devnum": _read_text(os.path.join(base, "devnum")),
+        })
+
+    return found
+
+
+def rtl_sdr_v4_present(root=USB_DEVICES_DIR):
+    for item in rtl_sdr_devices(root):
+        if item["manufacturer"] == V4_MANUFACTURER and item["product"] == V4_PRODUCT:
+            return True
+
+    return False
+
+
+def private_rtl_fm():
+    return os.path.join(PRIVATE_RTL_DIR, "bin", "rtl_fm")
+
+
+def rtl_fm_path():
+    private = private_rtl_fm()
+
+    if os.path.isfile(private) and os.access(private, os.X_OK):
+        return private
+
+    return "rtl_fm"
+
+
+def rtl_fm_library(binary):
+    res = _run(["ldd", binary])
+
+    if res is None or res.returncode != 0:
+        return ""
+
+    match = LIBRTLSDR_RE.search(res.stdout or "")
+    return match.group(1) if match else ""
+
+
+def rtl_fm_supports_v4():
+    binary = rtl_fm_path()
+
+    if binary == private_rtl_fm():
+        return True
+
+    binary = shutil.which(binary)
+
+    if not binary:
+        return None
+
+    library = rtl_fm_library(binary)
+
+    if not library:
+        return None
+
+    try:
+        with open(library, "rb") as f:
+            return V4_DRIVER_MARK in f.read()
+
+    except OSError:
+        return None
+
+
+def v4_driver_missing():
+    return rtl_sdr_v4_present() and rtl_fm_supports_v4() is False
+
+
+def reset_rtl_sdr(root=USB_DEVICES_DIR, nodes=USB_NODES_DIR):
+    done = False
+
+    for item in rtl_sdr_devices(root):
+        try:
+            node = os.path.join(nodes, "%03d" % int(item["busnum"]), "%03d" % int(item["devnum"]))
+            fd = os.open(node, os.O_WRONLY)
+
+        except (OSError, ValueError):
+            continue
+
+        try:
+            fcntl.ioctl(fd, USBDEVFS_RESET, 0)
+            done = True
+
+        except OSError:
+            pass
+
+        finally:
+            os.close(fd)
+
+    return done
 
 
 def rtl_sdr_present():
@@ -136,10 +278,10 @@ def test_capture(device, kind="sdr", freq="126.9", seconds=5, sample_rate=16000)
 
         else:
             cmd = (
-                "timeout %s rtl_fm -f %sM -M am -s 24000 -r %s - | "
+                "timeout %s %s -f %sM -M am -s 24000 -r %s - | "
                 "ffmpeg -hide_banner -loglevel error -y "
                 "-t %s -f s16le -ar %s -ac 1 -i - %s"
-            ) % (seconds + 8, float(freq), sample_rate, seconds, sample_rate, path)
+            ) % (seconds + 8, rtl_fm_path(), float(freq), sample_rate, seconds, sample_rate, path)
             res = subprocess.run(
                 cmd,
                 shell=True,

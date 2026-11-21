@@ -8,17 +8,26 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, GLib, Gtk
 
-from atis_relay_devices import list_capture_devices, test_capture
+from atis_relay_devices import list_capture_devices, test_capture, v4_driver_missing
 from atis_relay_service import (
     disable_service,
     enable_service,
     install_settings,
+    install_v4_driver,
     is_worker_active,
     service_enabled_state,
+    set_remote_commands,
     start_worker,
     stop_worker,
 )
-from atis_relay_status import format_local_time, read_status, start_stop_enabled, status_label
+from atis_relay_status import (
+    format_local_time,
+    read_notice,
+    read_status,
+    start_stop_enabled,
+    status_label,
+    suggestion_for_error,
+)
 from pi_atc_config import (
     apply_runtime_paths,
     env_path,
@@ -26,6 +35,7 @@ from pi_atc_config import (
     parse_stations,
     read_env_file,
     read_public_config,
+    remote_commands_enabled,
     station_token_for,
     valid_airport_code,
 )
@@ -33,6 +43,14 @@ from pi_atc_config import (
 KEY_HINT = "Enter the airport code (for example KMYF or 1G0) and ATIS frequency. Paste the station key ATIS Relay sent you. Leave airport 2 blank if you only have one."
 KEY_MISSING_1 = "Paste the station key ATIS Relay sent you."
 KEY_MISSING_2 = "Paste the station key ATIS Relay sent you for airport 2."
+REMOTE_LABEL = "Let ATIS Relay restart this Pi and the recorder remotely"
+REMOTE_ON_NOTE = "ATIS Relay can restart this Pi, restart the recorder, and reset the USB radio when needed."
+REMOTE_SAVE_FAILED = "Could not save that setting. Try again from this window."
+NOTICE_MARKUP = '<span foreground="#c01c28"><b>%s</b>\n%s</span>'
+V4_DRIVER_HINT = "Click Install driver. It needs internet and can take several minutes."
+V4_DRIVER_INSTALLING = "Installing the driver. This needs internet and can take several minutes."
+V4_DRIVER_INSTALLED = "Driver installed. Click Test."
+V4_DRIVER_FAILED = "Could not install the driver. Check that the Pi is online, then try again."
 ICON_NAME = "atis-relay"
 HEADER_LOGO_PX = 128
 
@@ -99,6 +117,17 @@ def header_logo_image():
             return None
 
 
+def run_capture_test(item, freq):
+    paused = is_worker_active() and stop_worker()
+
+    try:
+        return test_capture(item["id"], kind=item["kind"], freq=freq)
+
+    finally:
+        if paused:
+            start_worker()
+
+
 def _valid_freq(text):
     try:
         value = float(text)
@@ -137,6 +166,11 @@ class AtisRelayWindow(Gtk.Window):
         text.pack_start(subtitle, False, False, 0)
         header.pack_start(text, True, True, 0)
         outer.pack_start(header, False, False, 0)
+        self.notice_label = Gtk.Label()
+        self.notice_label.set_xalign(0)
+        self.notice_label.set_line_wrap(True)
+        self.notice_label.set_no_show_all(True)
+        outer.pack_start(self.notice_label, False, False, 0)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         outer.pack_start(self.stack, True, True, 0)
@@ -207,8 +241,12 @@ class AtisRelayWindow(Gtk.Window):
         refresh.connect("clicked", lambda *_a: self._reload_devices())
         test_btn = Gtk.Button.new_with_label("Test")
         test_btn.connect("clicked", self._on_test)
+        self.driver_btn = Gtk.Button.new_with_label("Install driver")
+        self.driver_btn.connect("clicked", self._on_install_driver)
+        self.driver_btn.set_no_show_all(True)
         row.pack_start(refresh, False, False, 0)
         row.pack_start(test_btn, False, False, 0)
+        row.pack_start(self.driver_btn, False, False, 0)
         box.pack_start(row, False, False, 0)
         self.level = Gtk.ProgressBar()
         self.level.set_show_text(True)
@@ -237,6 +275,13 @@ class AtisRelayWindow(Gtk.Window):
         self.autostart = Gtk.CheckButton.new_with_label("Start automatically when the Pi turns on")
         self.autostart.set_active(True)
         box.pack_start(self.autostart, False, False, 0)
+        self.remote = Gtk.CheckButton.new_with_label(REMOTE_LABEL)
+        self.remote_handler = self.remote.connect("toggled", self._on_remote_toggled)
+        box.pack_start(self.remote, False, False, 0)
+        self.remote_note = Gtk.Label()
+        self.remote_note.set_xalign(0)
+        self.remote_note.set_line_wrap(True)
+        box.pack_start(self.remote_note, False, False, 0)
         self.status_label = Gtk.Label(label="Stopped")
         self.status_label.set_xalign(0)
         self.status_label.get_style_context().add_class("heading")
@@ -300,6 +345,7 @@ class AtisRelayWindow(Gtk.Window):
                 "tokens": public.get("tokens") or {},
                 "audio_device": public.get("audio_device") or "",
                 "capture_kind": public.get("capture_kind") or "sdr",
+                "remote_commands": public.get("remote_commands") is True,
             }
 
         data = read_env_file(env_path())
@@ -311,6 +357,7 @@ class AtisRelayWindow(Gtk.Window):
             },
             "audio_device": (data.get("AUDIO_DEVICE") or "").strip(),
             "capture_kind": (data.get("CAPTURE_KIND") or "sdr").strip() or "sdr",
+            "remote_commands": remote_commands_enabled(data),
         }
 
     def _token_saved(self, icao):
@@ -343,8 +390,25 @@ class AtisRelayWindow(Gtk.Window):
 
         enabled = service_enabled_state()
         self.autostart.set_active(True if enabled is None else enabled)
+        self._show_remote_commands(bool(saved.get("remote_commands")))
         self._saved_device = saved.get("audio_device") or ""
         self._saved_kind = saved.get("capture_kind") or "sdr"
+
+    def _show_remote_commands(self, enabled):
+        self.remote.handler_block(self.remote_handler)
+        self.remote.set_active(enabled)
+        self.remote.handler_unblock(self.remote_handler)
+        self.remote_note.set_text(REMOTE_ON_NOTE if enabled else "")
+
+    def _on_remote_toggled(self, button):
+        wanted = button.get_active()
+
+        if set_remote_commands(wanted):
+            self.remote_note.set_text(REMOTE_ON_NOTE if wanted else "")
+            return
+
+        self._show_remote_commands(not wanted)
+        self.remote_note.set_text(REMOTE_SAVE_FAILED)
 
     def _stations_from_form(self):
         icao1 = normalize_airport_code(self.icao1.get_text())
@@ -433,6 +497,34 @@ class AtisRelayWindow(Gtk.Window):
         elif ids:
             self.device_combo.set_active(0)
 
+        self._show_driver_prompt()
+
+    def _show_driver_prompt(self):
+        if not v4_driver_missing():
+            self.driver_btn.hide()
+            return False
+
+        message, _fix = suggestion_for_error("v4_driver")
+        self.step2_note.set_text("%s %s" % (message, V4_DRIVER_HINT))
+        self.driver_btn.show()
+        return True
+
+    def _on_install_driver(self, button):
+        button.set_sensitive(False)
+        self.step2_note.set_text(V4_DRIVER_INSTALLING)
+
+        def work():
+            ok = install_v4_driver()
+            GLib.idle_add(self._driver_done, ok)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _driver_done(self, ok):
+        self.driver_btn.set_sensitive(True)
+        missing = self._show_driver_prompt()
+        self.step2_note.set_text(V4_DRIVER_FAILED if missing or not ok else V4_DRIVER_INSTALLED)
+        return False
+
     def _selected_device(self):
         chosen = self.device_combo.get_active_id()
 
@@ -468,13 +560,17 @@ class AtisRelayWindow(Gtk.Window):
 
     def _on_test(self, _button):
         item = self._selected_device()
+
+        if item["kind"] == "sdr" and self._show_driver_prompt():
+            return
+
         self.step2_note.set_text("Testing. You should hear a five second clip.")
         self.level.set_fraction(0.1)
         self.level.set_text("Testing")
         freq = self.freq1.get_text().strip() or "126.9"
 
         def work():
-            ok, level, error = test_capture(item["id"], kind=item["kind"], freq=freq)
+            ok, level, error = run_capture_test(item, freq)
             GLib.idle_add(self._test_done, ok, level, error)
 
         threading.Thread(target=work, daemon=True).start()
@@ -532,6 +628,7 @@ class AtisRelayWindow(Gtk.Window):
 
         self.error_label.set_text(data.get("error") or "")
         self.fix_label.set_text(data.get("fix") or "")
+        self._show_notice(read_notice())
         worker_active = is_worker_active()
 
         if worker_active and state == "stopped":
@@ -540,6 +637,19 @@ class AtisRelayWindow(Gtk.Window):
 
         self._apply_start_stop_buttons(state, worker_active)
         return True
+
+    def _show_notice(self, notice):
+        message = notice.get("message") or ""
+
+        if not message:
+            self.notice_label.hide()
+            return
+
+        self.notice_label.set_markup(NOTICE_MARKUP % (
+            GLib.markup_escape_text(message),
+            GLib.markup_escape_text(notice.get("fix") or ""),
+        ))
+        self.notice_label.show()
 
     def _apply_start_stop_buttons(self, state, worker_active=False):
         start_on, stop_on = start_stop_enabled(state, worker_active)

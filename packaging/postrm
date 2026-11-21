@@ -16,7 +16,7 @@ case "$1" in
     fi
     ;;
   remove)
-    rm -rf /opt/pi-atc/__pycache__
+    rm -rf /opt/pi-atc/__pycache__ /opt/pi-atc/rtl-sdr
     rmdir /opt/pi-atc >/dev/null 2>&1 || true
 
     if command -v systemctl >/dev/null 2>&1; then

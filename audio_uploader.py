@@ -6,6 +6,7 @@ import tempfile
 import subprocess
 import struct
 import math
+from atis_relay_devices import USB_DEVICES_DIR, rtl_fm_path, usb_root_hubs, v4_driver_missing
 from atis_relay_status import suggestion_for_error, write_status
 from pi_atc_config import (
     apply_runtime_paths,
@@ -125,10 +126,9 @@ def compare_envelopes(a, b, max_lag=5):
 TEMP_SHUTDOWN_C = float(os.environ.get("TEMP_SHUTDOWN_C", "78"))
 TEMP_RESUME_C = float(os.environ.get("TEMP_RESUME_C", "75"))
 THERMAL_PATH = "/sys/class/thermal/thermal_zone0/temp"
-USB_AUTH_PATHS = [
-    "/sys/bus/usb/devices/usb1/authorized",
-    "/sys/bus/usb/devices/usb2/authorized",
-]
+
+def usb_auth_paths():
+    return [os.path.join(USB_DEVICES_DIR, hub, "authorized") for hub in usb_root_hubs()]
 
 def read_cpu_temp():
     try:
@@ -145,7 +145,7 @@ def set_usb_power(on):
         return
 
     if not on:
-        for path in USB_AUTH_PATHS:
+        for path in usb_auth_paths():
             try:
                 with open(path, "w") as f:
                     f.write("0")
@@ -153,14 +153,14 @@ def set_usb_power(on):
                 pass
         return
 
-    for path in USB_AUTH_PATHS:
+    for path in usb_auth_paths():
         try:
             with open(path, "w") as f:
                 f.write("1")
         except Exception:
             pass
 
-    for hub in ["usb1", "usb2"]:
+    for hub in usb_root_hubs():
         try:
             with open(USB_DRIVER_UNBIND, "w") as f:
                 f.write(hub)
@@ -213,7 +213,7 @@ def record_wav(out_path: str, freq_mhz: str) -> bool:
 
     freq = float(freq_mhz)
     cmd = (
-        f"timeout {CHUNK_SEC + 10} rtl_fm -f {freq}M -M am -s 24000 -r {SAMPLE_RATE} - | "
+        f"timeout {CHUNK_SEC + 10} {rtl_fm_path()} -f {freq}M -M am -s 24000 -r {SAMPLE_RATE} - | "
         f"ffmpeg -hide_banner -loglevel error -y "
         f"-t {CHUNK_SEC} -f s16le -ar {SAMPLE_RATE} -ac 1 -i - {out_path}"
     )
@@ -409,6 +409,8 @@ def main():
             print(f"[temp] {temp:.1f}°C exceeds {TEMP_SHUTDOWN_C}°C, disabling USB")
             set_usb_power(False)
             usb_disabled = True
+            message, fix = suggestion_for_error("too_hot")
+            write_status(state="error", error=message, fix=fix)
 
         if usb_disabled:
             if temp is not None and temp <= TEMP_RESUME_C:
@@ -428,6 +430,13 @@ def main():
             message, fix = suggestion_for_error("missing_key")
             write_status(state="waiting", error=message, fix=fix)
             print("[wait] no stations configured; open the ATIS Relay app")
+            time.sleep(WAIT_SEC)
+            continue
+
+        if os.environ.get("CAPTURE_KIND", "sdr").strip().lower() != "alsa" and v4_driver_missing():
+            message, fix = suggestion_for_error("v4_driver")
+            write_status(state="error", error=message, fix=fix)
+            print("[capture] RTL-SDR Blog V4 needs a newer driver; not recording")
             time.sleep(WAIT_SEC)
             continue
 

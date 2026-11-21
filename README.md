@@ -73,17 +73,22 @@ A passing test looks like this:
 
 ![Step 2 after a successful audio test](docs/images/step2-test.png)
 
+If the radio is an RTL-SDR Blog V4, Raspberry Pi OS Bookworm ships a driver that is too old for it. The window says so and shows an **Install driver** button. Click it once. It needs internet and can take several minutes. It builds the newer driver into `/opt/pi-atc/rtl-sdr` and leaves the system driver alone. Other RTL-SDR radios do not need this step.
+
 ## 6. Start
 
 ![Step 3, start and stop the recorder](docs/images/step3-start.png)
 
 1. Leave **Start automatically when the Pi turns on** checked if you want it to run at boot, even before anyone signs in.
-2. Click **Start**. The window talks to the recorder service. You should not see a password prompt.
-3. Status should read **Listening**, then **Uploading** when a new clip is sent.
-4. Last upload uses local time, such as `3:05 PM`.
-5. If something is wrong, the window shows a short explanation and what to try.
+2. Check **Let ATIS Relay restart this Pi and the recorder remotely** if you want ATIS Relay to be able to restart the Pi, restart the recorder, or reset the USB radio when something is stuck. It is off until you check it, and it saves as soon as you click it.
+3. Click **Start**. The window talks to the recorder service. You should not see a password prompt.
+4. Status should read **Listening**, then **Uploading** when a new clip is sent.
+5. Last upload uses local time, such as `3:05 PM`.
+6. If something is wrong, the window shows a short explanation and what to try.
 
 ![Step 3 while the recorder is listening](docs/images/step3-listening.png)
+
+If ATIS Relay asks for a restart while that box is unchecked, nothing is restarted. The window shows a red warning with the request and what to do. A request to restart the Pi stays on screen until the Pi has restarted. The other requests clear the next time the recorder starts.
 
 You do not need the terminal or sudo after the package is installed. The app does not change WiFi, hostname, or NetworkManager.
 

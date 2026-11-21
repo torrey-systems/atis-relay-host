@@ -4,11 +4,22 @@ import subprocess
 import sys
 import tempfile
 
-from pi_atc_config import env_path, save_desktop_settings, write_public_config
+from pi_atc_config import REMOTE_ACTIONS, env_path, save_desktop_settings, write_public_config
 
 UNIT_NAME = "atis-relay.service"
+REMOTE_UNIT = "atis-relay-remote@%s.service"
 CTL_PATH = "/usr/lib/atis-relay/atis-relay-ctl"
-PRIV_ACTIONS = ("start", "stop", "restart", "enable", "disable", "install-config")
+PRIV_ACTIONS = (
+    "start",
+    "stop",
+    "restart",
+    "enable",
+    "disable",
+    "install-config",
+    "remote-commands",
+    "install-v4-driver",
+)
+V4_DRIVER_TIMEOUT_SEC = 1800
 
 
 def ctl_command():
@@ -103,6 +114,35 @@ def stop_worker():
 def restart_worker():
     res = run_ctl(["restart"])
     return res is not None and res.returncode == 0
+
+
+def set_remote_commands(enabled):
+    res = run_ctl(["remote-commands", "on" if enabled else "off"])
+    return res is not None and res.returncode == 0
+
+
+def install_v4_driver():
+    res = run_ctl(["install-v4-driver"], timeout=V4_DRIVER_TIMEOUT_SEC)
+    return res is not None and res.returncode == 0
+
+
+def run_remote_command(action, timeout=60):
+    if action not in REMOTE_ACTIONS:
+        return False
+
+    try:
+        res = subprocess.run(
+            ["systemctl", "--no-ask-password", "start", REMOTE_UNIT % action],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    return res.returncode == 0
 
 
 def install_settings(stations, tokens, audio_device="", capture_kind="sdr"):

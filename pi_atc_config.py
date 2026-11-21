@@ -20,6 +20,8 @@ DEFAULT_ATIS_RELAY_URL = "https://atisrelay.com"
 APP_ID = "atis-relay"
 SERVICE_USER = "atis-relay"
 ENV_FILE_MODE = 0o640
+REMOTE_COMMANDS_ON = ("1", "true", "yes", "on")
+REMOTE_ACTIONS = ("reboot", "restart_capture", "usb_reset")
 
 
 def xdg_dir(env_name, fallback):
@@ -109,7 +111,7 @@ def load_config():
             continue
 
         try:
-            load_dotenv(path, override=False)
+            load_dotenv(path, override=True)
 
         except OSError:
             continue
@@ -316,6 +318,18 @@ def save_desktop_settings(path, stations, tokens, audio_device="", capture_kind=
     return None
 
 
+def remote_commands_enabled(environ=None):
+    if environ is None:
+        environ = os.environ
+
+    value = environ.get("REMOTE_COMMANDS", "")
+
+    if not isinstance(value, str):
+        return False
+
+    return value.strip().lower() in REMOTE_COMMANDS_ON
+
+
 def public_payload(data):
     stations = parse_stations(data.get("STATIONS", "") if data else "")
     tokens = {}
@@ -328,6 +342,7 @@ def public_payload(data):
         "audio_device": ((data or {}).get("AUDIO_DEVICE") or "").strip(),
         "capture_kind": ((data or {}).get("CAPTURE_KIND") or "sdr").strip() or "sdr",
         "tokens": tokens,
+        "remote_commands": remote_commands_enabled(data or {}),
     }
 
 
@@ -374,6 +389,7 @@ def read_public_config():
             "audio_device": "",
             "capture_kind": "sdr",
             "tokens": {},
+            "remote_commands": False,
         }
 
     stations = data.get("stations") or []
@@ -390,6 +406,7 @@ def read_public_config():
         "audio_device": data.get("audio_device") or "",
         "capture_kind": data.get("capture_kind") or "sdr",
         "tokens": tokens,
+        "remote_commands": data.get("remote_commands") is True,
     }
 
 
