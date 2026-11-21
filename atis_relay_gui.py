@@ -549,7 +549,8 @@ class AtisRelayWindow(Gtk.Window):
 
 def main():
     apply_runtime_paths()
-    AtisRelayWindow()
+    window = AtisRelayWindow()
+    window.show_all()
     Gtk.main()
     return 0
 
