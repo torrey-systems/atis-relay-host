@@ -101,6 +101,9 @@ jobs:
           getent group atis-relay
           test -d /etc/atis-relay
           test -d /var/lib/atis-relay
+          stat -c '%U:%G' /etc/atis-relay | grep -qx root:atis-relay
+          stat -c '%a' /etc/atis-relay | grep -qx 750
+          runuser -u atis-relay -- test ! -w /etc/atis-relay
           python3 -c 'import sys; sys.path.insert(0, "/opt/pi-atc"); import audio_uploader, heartbeat, pi_atc_config, atis_relay_status, atis_relay_ctl'
           printf 'STATIONS=KMYF:126.9\n' > /etc/atis-relay/env
           chown atis-relay:atis-relay /etc/atis-relay/env
@@ -117,6 +120,8 @@ jobs:
           stat -c '%U' /etc/atis-relay/env | grep -qx root
           stat -c '%G' /etc/atis-relay/env | grep -qx atis-relay
           runuser -u atis-relay -- test -r /etc/atis-relay/env
+          stat -c '%U:%G' /etc/atis-relay | grep -qx root:atis-relay
+          stat -c '%a' /etc/atis-relay | grep -qx 750
           test ! -d /tmp/atis-smoke/.config/atis-relay
           status_out=$(atis-relay status 2>&1)
           printf '%s\n' "$status_out"

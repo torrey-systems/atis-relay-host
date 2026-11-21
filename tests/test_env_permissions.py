@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import errno
+import inspect
 import os
 import stat
 import tempfile
@@ -116,7 +118,7 @@ class SystemEnvPermissionsTest(unittest.TestCase):
                         config.write_env_file(self.path, {"STATIONS": "KMYF:126.9"})
 
         self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o640)
-        chown_env.assert_called_with(self.path)
+        chown_env.assert_any_call(self.path)
         add_user.assert_called_with("desktop")
 
     def test_chown_env_file_uses_root_and_service_group(self):
@@ -136,7 +138,52 @@ class SystemEnvPermissionsTest(unittest.TestCase):
                     config.apply_system_env_permissions(self.path, user="desktop")
 
         self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o640)
-        chown_env.assert_called_with(self.path)
+        chown_env.assert_any_call(self.path)
+        chown_env.assert_any_call(os.path.dirname(self.path))
+
+    def test_apply_permissions_does_not_give_the_service_user_the_env_dir(self):
+        with patch("pi_atc_config.SYSTEM_ENV_PATH", self.path):
+            with patch("pi_atc_config._chown_env_file"):
+                with patch("pi_atc_config._chown_service_user") as chown_user:
+                    with patch("pi_atc_config.add_user_to_service_group"):
+                        config.apply_system_env_permissions(self.path, user="desktop")
+
+        chown_user.assert_not_called()
+
+    def test_write_env_file_uses_exclusive_nofollow_create(self):
+        source = inspect.getsource(config.write_env_file)
+        self.assertIn("O_CREAT", source)
+        self.assertIn("O_EXCL", source)
+        self.assertIn("O_NOFOLLOW", source)
+        self.assertIn("fsync", source)
+
+    def test_write_env_file_refuses_dest_symlink(self):
+        victim = os.path.join(self.tmpdir.name, "victim")
+        with open(victim, "w") as handle:
+            handle.write("unchanged\n")
+        os.remove(self.path)
+        os.symlink(victim, self.path)
+
+        with self.assertRaises(OSError) as raised:
+            config.write_env_file(self.path, {"STATIONS": "KMYF:126.9"})
+
+        self.assertEqual(raised.exception.errno, errno.ELOOP)
+        with open(victim) as handle:
+            self.assertEqual(handle.read(), "unchanged\n")
+        self.assertTrue(os.path.islink(self.path))
+
+    def test_write_env_file_does_not_follow_tmp_symlink(self):
+        victim = os.path.join(self.tmpdir.name, "victim")
+        with open(victim, "w") as handle:
+            handle.write("unchanged\n")
+        os.symlink(victim, self.path + ".tmp")
+        config.write_env_file(self.path, {"STATIONS": "KMYF:126.9"})
+        with open(victim) as handle:
+            self.assertEqual(handle.read(), "unchanged\n")
+        self.assertTrue(os.path.isfile(self.path))
+        self.assertFalse(os.path.islink(self.path))
+        self.assertEqual(config.read_env_file(self.path)["STATIONS"], "KMYF:126.9")
+        self.assertTrue(os.path.islink(self.path + ".tmp"))
 
     def test_postinst_applies_system_env_permissions_on_upgrade(self):
         with open(os.path.join(ROOT, "packaging", "postinst")) as postinst_file:
@@ -144,6 +191,27 @@ class SystemEnvPermissionsTest(unittest.TestCase):
 
         self.assertIn("apply_system_env_permissions", postinst)
         self.assertNotIn("chmod 600 /etc/atis-relay/env", postinst)
+        self.assertIn("chown root:atis-relay /etc/atis-relay", postinst)
+        self.assertIn("chown atis-relay:atis-relay /var/lib/atis-relay", postinst)
+        self.assertNotIn("chown atis-relay:atis-relay /etc/atis-relay", postinst)
+
+    def test_tmpfiles_env_dir_is_root_service_group(self):
+        with open(os.path.join(ROOT, "packaging", "atis-relay.tmpfiles")) as tmpfiles_file:
+            tmpfiles = tmpfiles_file.read()
+
+        self.assertIn("d /etc/atis-relay 0750 root atis-relay -", tmpfiles)
+        self.assertNotIn("d /etc/atis-relay 0750 atis-relay atis-relay -", tmpfiles)
+
+    def test_recorder_state_stays_out_of_etc(self):
+        self.assertEqual(config.SYSTEM_STATE_DIR, "/var/lib/atis-relay")
+        self.assertEqual(config.SYSTEM_ENV_PATH, "/etc/atis-relay/env")
+
+        with open(os.path.join(ROOT, "packaging", "atis-relay.service")) as unit_file:
+            unit = unit_file.read()
+
+        self.assertIn("Environment=PI_ATC_ENV_FILE=/etc/atis-relay/env", unit)
+        self.assertIn("Environment=PI_ATC_STATE_DIR=/var/lib/atis-relay", unit)
+        self.assertIn("User=atis-relay", unit)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ The installer starts a background recorder. It runs at boot even if nobody signs
 
 ## 1. Download the package
 
-On a computer, open the [Releases](https://github.com/torrey-systems/atis-relay-host/releases) page and download `atis-relay-host_0.2.0_all.deb`. Copy that file onto the Pi (USB stick or the Downloads folder).
+On a computer, open the [Releases](https://github.com/torrey-systems/atis-relay-host/releases) page and download `atis-relay-host_0.2.1_all.deb`. Copy that file onto the Pi (USB stick or the Downloads folder).
 
 ![GitHub Releases page for torrey-systems/atis-relay-host, showing the .deb under Assets](docs/images/install-releases.png)
 
@@ -27,7 +27,7 @@ The dialog below is the Debian Bookworm GTK package installer (gdebi), captured 
 If you prefer one line in a terminal:
 
 ```bash
-sudo apt install ./atis-relay-host_0.2.0_all.deb
+sudo apt install ./atis-relay-host_0.2.1_all.deb
 ```
 
 Run that from the folder that contains the file.

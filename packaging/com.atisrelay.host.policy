@@ -5,15 +5,112 @@
 <policyconfig>
   <vendor>ATIS Relay</vendor>
   <vendor_url>https://atisrelay.com</vendor_url>
-  <action id="com.atisrelay.host.ctl">
-    <description>Control the ATIS Relay recorder</description>
-    <message>ATIS Relay needs permission to start or stop the recorder</message>
+  <action id="com.atisrelay.host.ctl.start">
+    <description>Start the ATIS Relay recorder</description>
+    <message>ATIS Relay needs permission to start the recorder</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
       <allow_active>yes</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">start</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.ctl.stop">
+    <description>Stop the ATIS Relay recorder</description>
+    <message>ATIS Relay needs permission to stop the recorder</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">stop</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.ctl.restart">
+    <description>Restart the ATIS Relay recorder</description>
+    <message>ATIS Relay needs permission to restart the recorder</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">restart</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.ctl.enable">
+    <description>Enable the ATIS Relay recorder at boot</description>
+    <message>ATIS Relay needs permission to enable the recorder</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">enable</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.ctl.disable">
+    <description>Disable the ATIS Relay recorder at boot</description>
+    <message>ATIS Relay needs permission to disable the recorder</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">disable</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.ctl.install-config">
+    <description>Save ATIS Relay station settings</description>
+    <message>ATIS Relay needs permission to save station settings</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">install-config</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.install-v4-driver">
+    <description>Install the ATIS Relay USB radio driver</description>
+    <message>ATIS Relay needs permission to install the USB radio driver</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">install-v4-driver</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.remote-commands">
+    <description>Change ATIS Relay remote control</description>
+    <message>ATIS Relay needs permission to turn remote commands on or off</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">remote-commands</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+  <action id="com.atisrelay.host.reboot">
+    <description>Reboot the ATIS Relay station</description>
+    <message>ATIS Relay needs permission to reboot this computer</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/atis-relay/atis-relay-ctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">remote</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
   </action>
 </policyconfig>

@@ -481,18 +481,67 @@ def write_env_file(path, data, mode=None):
     if mode is None:
         mode = ENV_FILE_MODE
 
+    if os.path.islink(path):
+        raise OSError(errno.ELOOP, "refusing to write through symlink", path)
+
     directory = os.path.dirname(path)
 
     if directory:
         os.makedirs(directory, exist_ok=True)
 
-    keys = list(data.keys())
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        for key in keys:
-            f.write("%s=%s\n" % (key, data[key]))
+    else:
+        directory = "."
 
-    os.replace(tmp, path)
+    keys = list(data.keys())
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = None
+    tmp = None
+
+    try:
+        for _ in range(16):
+            candidate = os.path.join(directory, ".env-%s.tmp" % os.urandom(8).hex())
+
+            try:
+                fd = os.open(candidate, flags, 0o600)
+
+            except OSError as exc:
+                if exc.errno in (errno.EEXIST, errno.ELOOP):
+                    continue
+
+                raise
+
+            tmp = candidate
+            break
+
+        if fd is None:
+            raise OSError(errno.EEXIST, "could not create env tempfile", directory)
+
+        with os.fdopen(fd, "w") as handle:
+            fd = None
+
+            for key in keys:
+                handle.write("%s=%s\n" % (key, data[key]))
+
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        os.replace(tmp, path)
+        tmp = None
+
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+
+            except OSError:
+                pass
+
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+
+            except OSError:
+                pass
 
     if os.path.abspath(path) == os.path.abspath(SYSTEM_ENV_PATH):
         apply_system_env_permissions(path)
@@ -656,7 +705,7 @@ def apply_system_env_permissions(path=None, user=None):
         except OSError:
             pass
 
-        _chown_service_user(directory)
+        _chown_env_file(directory)
 
     if user is None:
         user = installing_desktop_user()
