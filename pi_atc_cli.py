@@ -6,6 +6,7 @@ import sys
 from pi_atc_config import (
     apply_runtime_paths,
     atis_relay_url,
+    env_file_access,
     env_path,
     load_config,
     mask_secret,
@@ -122,14 +123,23 @@ def cmd_status(stdout=None, environ=None):
         environ = os.environ
 
     load_config()
-    tokens = token_map_from_env(environ)
-    shorthand = station_token(environ)
-    stations = stations_from_env(environ)
-    mode = upload_mode(environ)
     last = read_last_upload()
     uploads = read_last_uploads()
     heartbeat = read_last_heartbeat()
     device_mode = read_mode() or "unknown"
+    access = env_file_access(env_path())
+
+    if access == "unreadable":
+        print("can't read config (permission)", file=stdout)
+        print("relay url: %s" % atis_relay_url(environ), file=stdout)
+        print("device mode: %s" % device_mode, file=stdout)
+        _print_runtime_status(stdout, heartbeat, last, uploads)
+        return 0
+
+    tokens = token_map_from_env(environ)
+    shorthand = station_token(environ)
+    stations = stations_from_env(environ)
+    mode = upload_mode(environ)
     print("token: %s" % ("set" if (tokens or shorthand) else "not set"), file=stdout)
     print("relay url: %s" % atis_relay_url(environ), file=stdout)
     print("upload mode: %s" % ("http" if mode == "http" else ("legacy s3 (deprecated)" if mode == "s3" else "none")), file=stdout)
@@ -144,7 +154,11 @@ def cmd_status(stdout=None, environ=None):
         print("stations: not set", file=stdout)
 
     print("device mode: %s" % device_mode, file=stdout)
+    _print_runtime_status(stdout, heartbeat, last, uploads)
+    return 0
 
+
+def _print_runtime_status(stdout, heartbeat, last, uploads):
     if heartbeat and heartbeat.get("ts"):
         station = heartbeat.get("station") or ""
         extra = " %s" % station if station else ""
@@ -163,8 +177,6 @@ def cmd_status(stdout=None, environ=None):
         for icao in sorted(uploads):
             item = uploads[icao]
             print("  %s: %s %s" % (icao, item.get("key") or "-", item.get("ts") or "-"), file=stdout)
-
-    return 0
 
 
 def usage(stdout):

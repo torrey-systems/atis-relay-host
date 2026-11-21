@@ -113,8 +113,10 @@ jobs:
           fi
           test -f /etc/atis-relay/env
           grep -q '^STATION_TOKEN=smoke-token-not-for-prod$' /etc/atis-relay/env
-          stat -c '%a' /etc/atis-relay/env | grep -qx 600
-          stat -c '%U' /etc/atis-relay/env | grep -qx atis-relay
+          stat -c '%a' /etc/atis-relay/env | grep -qx 640
+          stat -c '%U' /etc/atis-relay/env | grep -qx root
+          stat -c '%G' /etc/atis-relay/env | grep -qx atis-relay
+          runuser -u atis-relay -- test -r /etc/atis-relay/env
           test ! -d /tmp/atis-smoke/.config/atis-relay
           status_out=$(atis-relay status 2>&1)
           printf '%s\n' "$status_out"
@@ -123,6 +125,28 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$status_out" | grep -qi 'token: set'
+          adduser --disabled-password --gecos "" smoke-desktop
+          adduser smoke-desktop atis-relay
+          user_status=$(runuser -u smoke-desktop -- atis-relay status 2>&1)
+          printf '%s\n' "$user_status"
+          if printf '%s\n' "$user_status" | grep -q smoke-token-not-for-prod; then
+            echo "token leaked from user status"
+            exit 1
+          fi
+          printf '%s\n' "$user_status" | grep -qi 'token: set'
+          printf '%s\n' "$user_status" | grep -q 'KMYF:126.9'
+          adduser --disabled-password --gecos "" smoke-other
+          other_status=$(runuser -u smoke-other -- atis-relay status 2>&1)
+          printf '%s\n' "$other_status"
+          printf '%s\n' "$other_status" | grep -F "can't read config (permission)"
+          if printf '%s\n' "$other_status" | grep -q 'token: not set'; then
+            echo "unreadable config reported as not set"
+            exit 1
+          fi
+          if printf '%s\n' "$other_status" | grep -q 'stations: not set'; then
+            echo "unreadable config reported stations as not set"
+            exit 1
+          fi
           if [ -f /var/lib/atis-relay/public.json ]; then
             if grep -q smoke-token-not-for-prod /var/lib/atis-relay/public.json; then
               echo "token leaked from public config"

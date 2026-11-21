@@ -46,7 +46,7 @@ class SetKeyTest(unittest.TestCase):
         data = open(self.env_path).read()
         self.assertIn("STATION_TOKEN=%s\n" % TOKEN, data)
         self.assertIn("STATION_TOKENS=KMYF:%s\n" % TOKEN, data)
-        self.assertEqual(stat.S_IMODE(os.stat(self.env_path).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.stat(self.env_path).st_mode), 0o640)
         self.assertTrue(self.restarts)
 
     def test_set_key_from_stdin(self):
@@ -212,6 +212,31 @@ class SetKeyTest(unittest.TestCase):
         self.assertNotIn(other, status)
         self.assertIn("KMYF:126.9 token: set", status)
         self.assertIn("1G0:119.475 token: set", status)
+
+    def test_status_unreadable_env_reports_permission_not_not_set(self):
+        with open(self.env_path, "w") as f:
+            f.write("ATIS_RELAY_URL=https://atisrelay.com\nSTATION_TOKEN=%s\nSTATIONS=KMYF:126.9\n" % TOKEN)
+
+        os.chmod(self.env_path, 0o000)
+        stdout = io.StringIO()
+        environ = {
+            "PI_ATC_ENV_FILE": self.env_path,
+            "PI_ATC_STATE_DIR": self.tmpdir.name,
+        }
+
+        try:
+            with patch.dict(os.environ, environ, clear=False):
+                code = pi_atc_cli.cmd_status(stdout=stdout, environ=environ)
+
+        finally:
+            os.chmod(self.env_path, 0o640)
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("can't read config (permission)", output)
+        self.assertNotIn("token: not set", output)
+        self.assertNotIn("stations: not set", output)
+        self.assertNotIn(TOKEN, output)
 
 
 if __name__ == "__main__":

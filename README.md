@@ -54,7 +54,7 @@ The window looks like this when you add airports:
 4. A second airport is optional. Each airport needs its own key.
 5. Click **Next**.
 
-The key is stored only on this Pi, in `/etc/atis-relay`, readable only by the recorder service (permission 600). The app never prints the key.
+The key is stored only on this Pi, in `/etc/atis-relay/env` (mode 640, owner root, group `atis-relay`). The recorder service and the installing desktop user can read it. It is not world-readable. The app never prints the key.
 
 If a key is already saved, the field says so. Leave it blank to keep the saved key:
 

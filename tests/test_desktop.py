@@ -38,7 +38,7 @@ class DesktopConfigTest(unittest.TestCase):
         self.env_patch.stop()
         self.tmpdir.cleanup()
 
-    def test_save_settings_mode_600_and_public_config_omits_token(self):
+    def test_save_settings_mode_640_and_public_config_omits_token(self):
         config.save_desktop_settings(
             self.env_file,
             [("KMYF", "126.9")],
@@ -46,7 +46,7 @@ class DesktopConfigTest(unittest.TestCase):
             audio_device="plughw:1,0",
             capture_kind="alsa",
         )
-        self.assertEqual(stat.S_IMODE(os.stat(self.env_file).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.stat(self.env_file).st_mode), 0o640)
         with open(self.env_file) as env_file:
             data = env_file.read()
         self.assertIn("STATION_TOKEN=%s\n" % TOKEN, data)
@@ -80,7 +80,7 @@ class DesktopConfigTest(unittest.TestCase):
         self.assertGreater(copied, 0)
         data = config.read_env_file(dest)
         self.assertEqual(data["STATION_TOKEN"], TOKEN)
-        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o640)
         with open(config.public_config_path()) as public_file:
             self.assertNotIn(TOKEN, public_file.read())
 
@@ -207,7 +207,7 @@ class HelperCtlTest(unittest.TestCase):
         self.assertEqual(code, 0)
         data = config.read_env_file(dest)
         self.assertEqual(data["STATION_TOKEN"], TOKEN)
-        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o640)
         with open(os.path.join(state_dir, "public.json")) as public_file:
             self.assertNotIn(TOKEN, public_file.read())
         tmpdir.cleanup()

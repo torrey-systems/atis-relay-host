@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+import errno
 import json
 import os
 import re
-import stat
+import subprocess
 import sys
 
 from dotenv import load_dotenv
 
 AIRPORT_CODE_RE = re.compile(r"^[A-Z0-9]{3,4}$")
+DESKTOP_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]*$")
 
 DEFAULT_ENV_PATH = "/etc/pi-atc/env"
 SYSTEM_ENV_PATH = "/etc/atis-relay/env"
@@ -17,6 +19,7 @@ LEGACY_ENV_PATH = "/opt/pi-atc/.env"
 DEFAULT_ATIS_RELAY_URL = "https://atisrelay.com"
 APP_ID = "atis-relay"
 SERVICE_USER = "atis-relay"
+ENV_FILE_MODE = 0o640
 
 
 def xdg_dir(env_name, fallback):
@@ -102,8 +105,14 @@ def public_config_path():
 def load_config():
     for path in env_search_paths():
 
-        if os.path.isfile(path):
+        if not os.path.isfile(path):
+            continue
+
+        try:
             load_dotenv(path, override=False)
+
+        except OSError:
+            continue
 
 
 def normalize_airport_code(value):
@@ -451,7 +460,10 @@ def read_env_file(path):
     return data
 
 
-def write_env_file(path, data, mode=0o600):
+def write_env_file(path, data, mode=None):
+    if mode is None:
+        mode = ENV_FILE_MODE
+
     directory = os.path.dirname(path)
 
     if directory:
@@ -464,13 +476,187 @@ def write_env_file(path, data, mode=0o600):
             f.write("%s=%s\n" % (key, data[key]))
 
     os.replace(tmp, path)
-    os.chmod(path, mode)
-    _chown_service_user(path)
 
-    if directory and os.path.abspath(directory) == os.path.abspath(os.path.dirname(SYSTEM_ENV_PATH)):
+    if os.path.abspath(path) == os.path.abspath(SYSTEM_ENV_PATH):
+        apply_system_env_permissions(path)
+
+    else:
+        try:
+            os.chmod(path, mode)
+
+        except OSError:
+            pass
+
+        _chown_service_user(path)
+
+
+def env_file_access(path=None):
+    if path is None:
+        path = env_path()
+
+    try:
+        with open(path):
+            return "ok"
+
+    except PermissionError:
+        return "unreadable"
+
+    except FileNotFoundError:
+        return "missing"
+
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            return "unreadable"
+
+        if exc.errno == errno.ENOENT:
+            return "missing"
+
+        return "unreadable"
+
+
+def installing_desktop_user():
+    sudo_user = os.environ.get("SUDO_USER")
+
+    if isinstance(sudo_user, str) and sudo_user.strip() and sudo_user.strip() != "root":
+        name = sudo_user.strip()
+
+        if _valid_desktop_user(name):
+            return name
+
+    raw = os.environ.get("PKEXEC_UID")
+
+    if raw is not None and str(raw).strip() != "":
+        try:
+            uid = int(raw)
+
+        except (TypeError, ValueError):
+            uid = None
+
+        if uid is not None and uid != 0:
+            name = _user_name_for_uid(uid)
+
+            if _valid_desktop_user(name):
+                return name
+
+    if os.geteuid() != 0:
+        name = _user_name_for_uid(os.geteuid())
+
+        if _valid_desktop_user(name) and name != SERVICE_USER:
+            return name
+
+    return None
+
+
+def _user_name_for_uid(uid):
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name
+
+    except (ImportError, KeyError, OSError, OverflowError):
+        return None
+
+
+def _valid_desktop_user(name):
+    if not name or not isinstance(name, str):
+        return False
+
+    if name in ("root", "nobody", SERVICE_USER):
+        return False
+
+    if len(name) > 32:
+        return False
+
+    return DESKTOP_USER_RE.match(name) is not None
+
+
+def add_user_to_service_group(user):
+    if not _valid_desktop_user(user):
+        return False
+
+    if os.geteuid() != 0:
+        return False
+
+    if _user_in_service_group(user):
+        return True
+
+    for cmd in (
+        ["adduser", user, SERVICE_USER],
+        ["usermod", "-aG", SERVICE_USER, user],
+    ):
+        try:
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        except OSError:
+            continue
+
+        if res.returncode == 0 or _user_in_service_group(user):
+            return True
+
+    return False
+
+
+def _user_in_service_group(user):
+    try:
+        import grp
+        import pwd
+        info = pwd.getpwnam(user)
+        group = grp.getgrnam(SERVICE_USER)
+
+    except (ImportError, KeyError, OSError):
+        return False
+
+    if info.pw_gid == group.gr_gid:
+        return True
+
+    return user in group.gr_mem
+
+
+def apply_system_env_permissions(path=None, user=None):
+    if path is None:
+        path = SYSTEM_ENV_PATH
+
+    if os.path.isfile(path):
+        try:
+            os.chmod(path, ENV_FILE_MODE)
+
+        except OSError:
+            pass
+
+        _chown_env_file(path)
+
+    directory = os.path.dirname(path)
+    system_dir = os.path.dirname(SYSTEM_ENV_PATH)
+
+    if directory and os.path.isdir(directory) and os.path.abspath(directory) == os.path.abspath(system_dir):
+        try:
+            os.chmod(directory, 0o750)
+
+        except OSError:
+            pass
+
         _chown_service_user(directory)
 
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    if user is None:
+        user = installing_desktop_user()
+
+    add_user_to_service_group(user)
+
+
+def _chown_env_file(path):
+    try:
+        import grp
+        gid = grp.getgrnam(SERVICE_USER).gr_gid
+        os.chown(path, 0, gid)
+
+    except (ImportError, KeyError, OSError, PermissionError):
+        return False
+
+    return True
 
 
 def _chown_service_user(path):
