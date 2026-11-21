@@ -50,7 +50,8 @@ ensure_paths() {
   fi
 
   mkdir -p /etc/atis-relay /var/lib/atis-relay
-  chown atis-relay:atis-relay /etc/atis-relay /var/lib/atis-relay
+  chown root:atis-relay /etc/atis-relay
+  chown atis-relay:atis-relay /var/lib/atis-relay
   chmod 750 /etc/atis-relay
   chmod 755 /var/lib/atis-relay
 }

@@ -902,6 +902,61 @@ class RemotePackagingTest(unittest.TestCase):
 
         self.assertNotIn(service.UNIT_NAME, rules)
 
+    def test_polkit_passwordless_verbs_keep_local_session_yes(self):
+        policy = self._read("packaging", "com.atisrelay.host.policy")
+        rules = self._read("packaging", "10-com.atisrelay.host.rules")
+        passwordless = (
+            ("com.atisrelay.host.ctl.start", "start"),
+            ("com.atisrelay.host.ctl.stop", "stop"),
+            ("com.atisrelay.host.ctl.restart", "restart"),
+            ("com.atisrelay.host.ctl.enable", "enable"),
+            ("com.atisrelay.host.ctl.disable", "disable"),
+            ("com.atisrelay.host.ctl.install-config", "install-config"),
+        )
+
+        for action_id, argv1 in passwordless:
+            self.assertIn('id="%s"' % action_id, policy)
+            self.assertIn(
+                '<annotate key="org.freedesktop.policykit.exec.argv1">%s</annotate>' % argv1,
+                policy,
+            )
+            block = policy.split('id="%s"' % action_id, 1)[1].split("</action>", 1)[0]
+            self.assertIn("<allow_active>yes</allow_active>", block)
+            self.assertNotIn("auth_admin", block)
+
+        self.assertIn('action.id.indexOf("com.atisrelay.host.ctl.") == 0', rules)
+        self.assertIn("subject.local", rules)
+        self.assertIn("subject.active", rules)
+        self.assertNotIn('action.id == "com.atisrelay.host.ctl"', rules)
+        self.assertNotIn('id="com.atisrelay.host.ctl"', policy)
+
+    def test_polkit_admin_verbs_require_authentication(self):
+        policy = self._read("packaging", "com.atisrelay.host.policy")
+        rules = self._read("packaging", "10-com.atisrelay.host.rules")
+        admin = (
+            ("com.atisrelay.host.install-v4-driver", "install-v4-driver"),
+            ("com.atisrelay.host.remote-commands", "remote-commands"),
+            ("com.atisrelay.host.reboot", "remote"),
+        )
+
+        for action_id, argv1 in admin:
+            self.assertIn('id="%s"' % action_id, policy)
+            self.assertIn(
+                '<annotate key="org.freedesktop.policykit.exec.argv1">%s</annotate>' % argv1,
+                policy,
+            )
+            block = policy.split('id="%s"' % action_id, 1)[1].split("</action>", 1)[0]
+            self.assertIn("<allow_any>auth_admin</allow_any>", block)
+            self.assertIn("<allow_inactive>auth_admin</allow_inactive>", block)
+            self.assertIn("<allow_active>auth_admin_keep</allow_active>", block)
+            self.assertNotIn("<allow_active>yes</allow_active>", block)
+            self.assertNotIn('action.id == "%s"' % action_id, rules)
+            self.assertNotIn('action.id.indexOf("%s"' % action_id, rules)
+
+        self.assertIn("install-v4-driver", service.PRIV_ACTIONS)
+        self.assertIn("remote-commands", service.PRIV_ACTIONS)
+        self.assertIn("install-config", service.PRIV_ACTIONS)
+
     def test_package_ships_the_remote_unit_and_driver_installer(self):
         nfpm = self._read("packaging", "nfpm.yaml")
         self.assertIn("dst: /lib/systemd/system/atis-relay-remote@.service", nfpm)

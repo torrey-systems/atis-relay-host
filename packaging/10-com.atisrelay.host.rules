@@ -1,5 +1,5 @@
 polkit.addRule(function(action, subject) {
-    if (action.id == "com.atisrelay.host.ctl" &&
+    if (action.id.indexOf("com.atisrelay.host.ctl.") == 0 &&
         subject.local &&
         subject.active) {
         return polkit.Result.YES;

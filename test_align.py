@@ -87,12 +87,27 @@ def circular_xcorr(a, b):
         best = max(best, acc / n)
     return best
 
-def main():
-    pairs = [
-        ("DIFFERENT", "/Users/forddavis/Downloads/KMYF_kzjkgew4.mp3", "/Users/forddavis/Downloads/KMYF_wy9devlr.mp3"),
-        ("SAME", "/Users/forddavis/Downloads/KMYF_870okd5l.mp3", "/Users/forddavis/Downloads/KMYF_7tc4xx5l.mp3"),
-        ("NEW PAIR", "/Users/forddavis/Downloads/KMYF_raf9o9ol.mp3", "/Users/forddavis/Downloads/KMYF_mdmlr6vs.mp3"),
-    ]
+def parse_pairs(argv):
+    if len(argv) < 3 or len(argv) % 3 != 0:
+        return None
+
+    pairs = []
+
+    for i in range(0, len(argv), 3):
+        pairs.append((argv[i], argv[i + 1], argv[i + 2]))
+
+    return pairs
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    pairs = parse_pairs(argv)
+
+    if pairs is None:
+        print("usage: test_align.py LABEL FILE1 FILE2 [LABEL FILE1 FILE2 ...]", file=sys.stderr)
+        return 2
 
     for label, f1, f2 in pairs:
         if not (os.path.exists(f1) and os.path.exists(f2)):
@@ -116,5 +131,7 @@ def main():
         print(f"  circular xcorr (old): {circ:.4f}")
         print()
 
+    return 0
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
